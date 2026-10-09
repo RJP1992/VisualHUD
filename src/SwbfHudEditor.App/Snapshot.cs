@@ -1,0 +1,138 @@
+using System.Globalization;
+using System.IO;
+using System.Windows;
+using System.Windows.Media.Imaging;
+using SwbfHudEditor.App.Views;
+using SwbfHudEditor.Core.Assets;
+using SwbfHudEditor.Core.Events;
+using SwbfHudEditor.Core.Hud;
+using SwbfHudEditor.Core.Layout;
+
+namespace SwbfHudEditor.App;
+
+/// <summary>
+/// Renders a <c>.hud</c> file as the editor's canvas draws it to a PNG, without a window:
+/// <code>
+/// VisualHUD.exe --snapshot file.hud out.png [--screen 1280x720] [--game gameext|vanilla]
+///               [--snap on|off] [--viewport 1] [--background shot.png] [--no-placeholders] [--no-guides]
+///               [--preset onfoot] [--send event[=value]]... [--dump layout.txt]
+/// </code>
+/// <c>--background</c> draws the HUD over an image of the same size, such as an in-game screenshot.
+/// <c>--preset onfoot</c> sends the Events tab's on-foot scenario, then <c>--send</c>, repeated, sends
+/// more events in that order (a value typed as in the Events tab).
+/// <c>--dump</c> writes every element as laid out: shown or not, where, and what it draws.
+/// Errors go to <c>out.png.error.txt</c>; the exit code is 0 on success.
+/// </summary>
+internal static class Snapshot
+{
+    public static bool TryRun(string[] args, out int exitCode)
+    {
+        exitCode = 0;
+        var at = Array.IndexOf(args, "--snapshot");
+        if (at < 0) return false;
+        var output = at + 2 < args.Length ? args[at + 2] : "snapshot.png";
+        try
+        {
+            Run(args, at);
+        }
+        catch (Exception ex)
+        {
+            File.WriteAllText(output + ".error.txt", ex.ToString());
+            exitCode = 1;
+        }
+        return true;
+    }
+
+    private static void Run(string[] args, int at)
+    {
+        if (at + 2 >= args.Length) throw new ArgumentException("--snapshot takes a .hud file and an output .png");
+        var hudPath = Path.GetFullPath(args[at + 1]);
+        var output = Path.GetFullPath(args[at + 2]);
+
+        var screen = new HudScreen(1280, 720);
+        var target = HudTarget.GameExt;
+        bool? snap = null;
+        var viewport = 1;
+        var placeholders = true;
+        var guides = true;
+        string? background = null;
+        var sends = new List<(string Name, string? Value)>();
+        string? dump = null;
+        string? preset = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
+            switch (args[i])
+            {
+                case "--screen":
+                    var parts = Next().ToLowerInvariant().Split('x');
+                    screen = new HudScreen(int.Parse(parts[0], CultureInfo.InvariantCulture), int.Parse(parts[1], CultureInfo.InvariantCulture));
+                    break;
+                case "--game":
+                    target = Next().ToLowerInvariant() == "vanilla" ? HudTarget.Vanilla : HudTarget.GameExt;
+                    break;
+                case "--snap":
+                    snap = Next().ToLowerInvariant() is "on" or "1" or "true";
+                    break;
+                case "--viewport":
+                    viewport = int.Parse(Next(), CultureInfo.InvariantCulture);
+                    break;
+                case "--background":
+                    background = Path.GetFullPath(Next());
+                    break;
+                case "--no-placeholders":
+                    placeholders = false;
+                    break;
+                case "--no-guides":
+                    guides = false;
+                    break;
+                case "--send":
+                    var send = Next();
+                    var eq = send.IndexOf('=');
+                    sends.Add(eq < 0 ? (send, null) : (send[..eq], send[(eq + 1)..]));
+                    break;
+                case "--dump":
+                    dump = Path.GetFullPath(Next());
+                    break;
+                case "--preset":
+                    preset = Next().ToLowerInvariant();
+                    if (preset != "onfoot") throw new ArgumentException("--preset takes onfoot");
+                    break;
+            }
+        }
+
+        var doc = HudParser.Parse(File.ReadAllText(hudPath), hudPath);
+        var assets = AssetResolver.ForHudFile(hudPath, Directory.Exists(MainWindow.StockDataCommon) ? MainWindow.StockDataCommon : null);
+        var canvas = new HudCanvas();
+        canvas.Configure(target, screen, snap, viewport, placeholders, guides);
+        canvas.LoadDocument(doc, assets, MainWindow.TryLoadLocalization(assets), MainWindow.TryLoadTransformDocuments(hudPath));
+        if (sends.Count > 0 || preset is not null)
+        {
+            // Type each event by what it is, else by how the files use it.
+            var uses = HudEventUsage.Of(doc, canvas.Transforms!).ToDictionary(u => u.Name, StringComparer.OrdinalIgnoreCase);
+            var state = new HudEventState();
+            if (preset == "onfoot") state.SendAll(HudEventPresets.OnFoot(canvas.Transforms!));
+            foreach (var (name, text) in sends)
+            {
+                var type = HudEventCatalog.Find(name)?.Type ?? (uses.TryGetValue(name, out var use) ? use.Type : HudEventType.Bool);
+                if (!HudEventText.TryParse(type, text ?? HudEventText.Format(HudEventValue.Default(type)), out var value))
+                    throw new ArgumentException($"{name}: \"{text}\" is not a {type}");
+                state.Send(name, value);
+            }
+            canvas.SetEventState(state);
+        }
+
+        BitmapSource? backdrop = null;
+        if (background is not null)
+        {
+            var decoder = BitmapDecoder.Create(new Uri(background), BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            backdrop = decoder.Frames[0];
+        }
+        var image = canvas.RenderSnapshot(backdrop);
+        if (dump is not null) File.WriteAllText(dump, canvas.DescribeLayout());
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(image));
+        using var stream = File.Create(output);
+        encoder.Save(stream);
+    }
+}

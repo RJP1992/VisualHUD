@@ -1,0 +1,190 @@
+# How the game lays out and draws a .hud file
+
+What `SwbfHudEditor.Core/Layout` implements, with where each rule was read. Addresses are
+the modtools executable `BF2_modtools_MemExt.exe` (**M**) or the Phantom build with names
+(**P**); retail Steam and GOG match modtools in everything here. The deeper research is
+in BF2GameExt's `docs/RE/HUDSystem.md`, `HUDElementProperties.md` and `HUDAuthoring.md`.
+
+Matrices are row-vector, as `PblMatrix` and D3DX: a point is `p × M`, and `A × B` applies
+A first. Floats are single precision, as in the game.
+
+## Three spaces
+
+- **HUD pixels.** What `.hud` numbers become once read: x right, y down, one unit a
+  device pixel of the screen (`HUD::Element::SetupViewportDimensions`, P `005F57D0`).
+- **Interface units.** The plane the HUD screen groups are drawn on, x right, y up, 640
+  units across the screen whatever its width. The interface camera
+  (`RedInterfaceScreen::Render`, M `00817870`) has frustum width `t = 2 tan 30°` at
+  distance 1 and height `t·H/W`, and the plane sits at `z = -640/t`.
+- **Screen pixels.** `x = (u + 320)·W/640`, `y = H/2 - v·W/640`.
+
+The screen is `RedInterfaceScreen::s_screenFull`, the back buffer
+(`RedRenderer::internalResetState`, M `0080CD80`), which also sets
+`m_screenAspectRatio = H/W`.
+
+## Reading a line
+
+Each element type's `ReadData` takes its own keys and hands the rest down to
+`HUD::Element::ReadData`. A later line replaces an earlier one.
+
+- Names go through `HUD::TranslateString` (P `00618150`): the first table name the text
+  **starts with**, ignoring case. `"ScreenSpace"` reads as Screen; `"Viewpor"` as nothing.
+- A quoted string is told from a number by the argument's raw value; an unquoted word is
+  its hash, so it reads as `true` and never as a name.
+- `Position(x, y, z [, mode])` (P `005F4540`): with four arguments, one of `Pixels`,
+  `Screen`, `Viewport`, `Frame`, or a bool where true is Viewport. **Without a mode, or
+  with an unknown name, Pixels.**
+- `Rotation(x, y, z)` in degrees, each wrapped into [0, 360); the matrix is
+  `RotationX × RotationY × RotationZ` (P `005F51E0`).
+- `Scale(x, y, z)`, applied after the rotation: `R × S` (`HUD::Matrix::ApplyScale`,
+  P `005F2C40`), so it stretches along the parent's axes.
+- `Rect(w, h [, h [, v [, mode]]])` on group types (`ElementGroupBase::ReadData`,
+  P `005FC510`): 1 × 1, Viewport, Left/Top by default. Mode is one of the first three
+  names or a bool (0 is Pixels); an unknown name keeps the mode.
+- `BitmapRect(w, h [, h [, v [, mode]]])` (P `005FA670`): the mode is read only with
+  exactly five arguments: one of the first three names, else a number where **0 means
+  Screen**, else Viewport.
+- `TextAlignment(h, v)`: `Left`, `Right`, `Center` (Right before Center) and `Top`,
+  `Bottom`, `Center`, `Baseline`; a half that names nothing keeps its value.
+- `ZOrder` starts at **128** (`RedInterfaceElement` constructor, P `00891350`).
+- `Viewport(n)` counts only on a top-level element: `HUD::Element::GetViewport`
+  (P `005F3BE0`) asks the element's group, up to the top.
+
+## Setup: what each element's PostReadSetup leaves
+
+`HUD::ConvertRelativeToPixels(mode, value, frame, view, screen)` (M `00691120`):
+Pixels keeps the number, Screen multiplies by the screen, Viewport by the view, Frame by
+the frame. For an element:
+
+- **view** is `GetContainerViewWidth/Height`: the screen with one viewport.
+- **frame** is `GetContainerFrameWidth/Height` (P `005F3630`): the element's group's Rect
+  in pixels, else the view. A child's group is set by `ElementGroupBase::ReadChild`
+  (P `005FC3F0`) before the child is read.
+
+Then:
+
+1. **Every element** (`HUD::Element::PostReadSetup`, P `005F3CA0`): the position
+   converted, z kept, rotation times scale. Modtools also passes x through
+   `ConvertXForWideScreen` (M `00691210`), which is the identity on shipped builds.
+2. **Groups** (`ElementGroupBase::PostReadSetup`, P `005FC260`, through `SetAlignment`,
+   P `005FC7E0`): the origin moves by `-{0, ½, 1}` of the Rect, so a child at (0, 0) sits
+   at the Rect's top left.
+3. **Bitmaps** (`ElementBitmapBase::PostReadSetup`, M `00698790`): `BitmapRect` makes a
+   quad around the position (Left `0..w`, Center `-w/2..w/2`, Right `-w..0`), its corners
+   converted in the rect's mode, each edge rounded with `floor(v + 0.5)`
+   (`RedBitmapElement::SetRect`, M `00839130`). A bitmap without `BitmapRect` draws
+   nothing; its texture never sizes it. Then `RedInterfaceElement::Scale(1, 0.75 / (H/W))`
+   (M `008285F0`) stretches the bitmap's own y axis: 4/3 at 16:9.
+4. **Bars** (`ElementBarBitmap::PostReadSetup`, P `005F7480`): the bar base's setup calls
+   `SetValue(Value)` before the bar has stored its width and U span (constructor values 1
+   and 1). `SetValue` (P `005F7920`) fills only when the value as read differs from the
+   fraction by over 1e-4, so with the stock 0..1 range a bar loads **full**, and with any
+   other range the first fill collapses it to a pixel. The fill keeps the left edge and the
+   left U: `right = left + f·width`, `u1 = u0 + f·u1` (the U span is wrong unless
+   `u0 = 0`). Defaults: Value 1, MinValue 0, MaxValue 1, ScaleTexture and ScaleSize on.
+5. **Segmented bars** (`ElementBarSegmented::SetValue`, M `00696AB0`): each lit segment's
+   matrix is replaced. In a row, x from 0 in steps of `(int)RectWidth / N`. On the ellipse,
+   from `AngleStart` in steps of `|AngleEnd - AngleStart| / N`: `x = rx + rx·sin a`,
+   `y = ry - k·ry·cos a` with `k = 0.75 / (H/W)`, rotated by a. The template `Segment` gives
+   the quad; its own position and the bitmap stretch are dropped.
+6. **Text** (`ElementText::ReadData`, P `0060C850`): `TextBox` is
+   `(int)(w × view width), (int)(h × view height)`. `RedTextElement::WriteCache`
+   (P `008C6A20`) lays lines out from the element's origin: x 0, `box - line` or half that;
+   y 0, `box - lines`, half that, or the font's ascent up for Baseline.
+7. **Models** (`ElementModel3D::PostReadSetup`, P `00605BA0`): each `MeshInfo`'s
+   position is converted with the element's sizes, and when that mesh is shown
+   `ElementModel3D::SetMesh` (P `006063A0`) replaces the element's whole matrix with the
+   MeshInfo's (identity rotation and scale 1 unless it says otherwise).
+
+## Draw
+
+- **Screen group.** `HUD::Manager::Open` (M `006B8A00`) makes the HUD's groups with the
+  safe zone off and the 640 × 480 mapping on. `RedInterfaceScreen::Render` draws a group
+  under `diag(640/W, -480/H, 1)` with translation `(-320, 240, -640/t)`.
+- **Letterbox.** The loader (M `006B7300`) sets each group's local matrix to
+  `SetMatrixPosScale(0, d/2, 1, 1 - d/H)` with `d = 0.75W - H`, when the screen is at
+  least 2 pixels wider than 4:3. With the mapping that leaves y at
+  `H/2 + a(2 - a)(y - H/2)` with `a = 0.75 W/H`: 40 to 680 at 1280×720. On a screen
+  narrower than 4:3 there is no letterbox and the factor is `a`.
+- **Each element** (draw, M `00816FA0`): `world = local × parent`, translation x and y
+  rounded to whole interface units with `floor(v + 0.5)`; children start from the rounded
+  matrix. GameExt's `HudSubPixel` (on by default) skips the rounding.
+- **Colour and alpha.** A child's colour is always multiplied by its group's RGB; its
+  alpha by the group's only with `PropagateAlpha(1)` (`RedGroupElement::RenderUsingContext`,
+  P `008C38F0`).
+- **Order.** `RedGroupElement::AddElement` (P `008C3650`) puts a new child after every
+  child with an equal or higher z-order; a `ZOrder` line (`SetZOrder`, P `00891EE0`) moves
+  it in front of the first with an equal or lower one. The list runs from high to low and
+  is drawn from its head: a lower ZOrder draws on top.
+- **Runtime HUD scale.** `HUD::Element::SetRuntimeScale` (P `005F5400`) rescales the axes
+  of `Scalable(1)` elements and keeps their translation.
+
+## GameExt
+
+The **GameExt** target adds what BF2GameExt does; the C# is a line-for-line port of its
+`hud_true_widescreen_core.hpp` and `hud_bar_fill_from_core.hpp`, and the tests run its
+C++ test vectors.
+
+- **AuthoredRatio(w, h) / TrueWidescreen(1)** in `FileInfo`, with one viewport: the
+  file is laid out on a screen of its ratio R at the real height, `WL = R·H` (a 4:3 file
+  only on a screen wider than 4:3). Screen and Viewport widths are WL; bitmaps, rings and
+  the minimap get no stretch; each top-level piece is drawn under its own parent, one pixel
+  to one pixel, slid by `{0, ½, 1}·(W - WL)` by the third of WL its x is in, or by its
+  `ScreenAnchor` share. A top-level element at (0, 0) without an anchor is a plain
+  container whose children are the pieces; a `Target` is never slid.
+- **FillFrom("Right" | "Bottom" | "Top")** on bars.
+- **No rounding** by default (`HudSubPixel`).
+
+The **Vanilla** target ignores all of these lines, as the stock game does (it logs an
+error for each).
+
+## Events
+
+`SwbfHudEditor.Core/Events` simulates what the game's events do, for the Events tab and
+`--preset`/`--send`. The editor keeps the latest send of each event and the order sends came in.
+
+- **Showing and hiding.** An element starts disabled (`HUD::Element` constructor, P
+  `005F1E70`, sets `enableState_Disabled`). `EventEnable` and `EventDisable` take any event,
+  whatever its value (P `005F3410`), and each binds one handler, the last line's. So an element
+  is enabled when its enable event was sent after its disable event, and drawn when it and every
+  group above it are enabled. Every one of the stock HUD's 184 elements has an `EventEnable`;
+  an element without one never shows in the game.
+- **Transforms** run in declaration order, each when one of its triggers has been sent: the
+  native classes as the game's code (`TransformNumberColor::CalculateOutputColor`
+  P `0061D1D0`, `TransformNumberType::CalculateInputValue` P `0061DE70` with its odd wrap,
+  `CalculateOutputVector3` P `0061E260`, `TransformNumberColorBlend::EventInput` P `0061D940`
+  with Alpha mode and a weight of 127 by default, `TransformNameMesh::EventInput` P `0061C8E0`
+  by name hash), and GameExt's Math, Lerp and Compare as its docs describe. Names inside a
+  `ViewPort` with `EventNameFilter("player%")` are renamed to player 1.
+- **Handlers.** `EventValue` fills a bar (numbers only); `EventText` sets a String or looks a
+  Uint up as a localization hash; `EventNumber` prints with `IntegerFormat` (`%d`),
+  `FloatFormat` (`%f`), `Percent` (`%.0f%`), `NumberToTime` or `InfiniteDashes`
+  (`ElementText::EventNumber`, P `0060BE50`); `EventColor` replaces the colour (Color only);
+  `EventBitmap` and `EventMesh` swap the texture or model by name; a group's
+  `EventPosition` is read in its Rect mode and aligned again, `EventScale` sets its own axes'
+  lengths and `EventRotation` rebuilds its rotation keeping them (P `005FB930`, `005FBDE0`,
+  `005FBAC0`); `EventAlpha` replaces a group's alpha.
+- **GameExt's world-tracking positions** (reticule, lock-on, target, command posts) in a file it
+  lays out land on the real screen point: x is handed over as `(v·W − slide) / WL`.
+- **Names** hash with `PblHash` (FNV-1a, each byte OR 0x20), so they match whatever their case.
+
+## Not modelled yet
+
+- **Model sizes.** A model's translation is scaled by its `Depth` (0.01 by default) and a
+  perspective factor (`Red3DModelElementLite::LocalToWorld`, P `008DECE0`;
+  `GetDepthMultiplier`, P `008DEC60`), which brings it near the camera. The preview still
+  sizes a mesh unit as 1/7 of the width, an estimate.
+- **Fonts.** Glyph sizes come from the game's font data; the preview uses a system font at
+  estimated heights.
+- **Map, Target, MultilineText, ObjectiveList, VehicleSeating, BorderedBox** draw from
+  code the preview does not run; they show as outlines of their Rect.
+- **Time.** The simulation has no clock: fades (`FadeInTime`, `FadeHoldTime` and the rest) are
+  at their end, a Lerp has reached its input, a Compare's hysteresis is not applied, and
+  `EventChanged`, `ColorChange` flashes and pulse rates are not shown.
+- **Code-driven elements.** What the Map, Target, VehicleSeating, ObjectiveList and
+  MultilineText elements draw from the game's state.
+- **ReticleCorrection.** GameExt shifts `player1.weaponN.reticule.position`'s y for stock files
+  on a wide screen; the editor sends the value as typed.
+- **Perspective.** Depth is dropped: an element tilted out of the screen plane by
+  `Rotation` x or y is drawn foreshortened but without perspective.
+- **ProceduralBarBitmap**'s flicker and its 1.3× size.

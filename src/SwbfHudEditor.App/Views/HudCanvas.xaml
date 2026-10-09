@@ -1,0 +1,110 @@
+<UserControl x:Class="SwbfHudEditor.App.Views.HudCanvas"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             Background="#181818">
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#222" Padding="6,3" BorderBrush="#333" BorderThickness="0,0,0,1">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Game:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="TargetCombo" SelectedIndex="0" Width="90" SelectionChanged="TargetCombo_SelectionChanged"
+                              ToolTip="Which game to draw the HUD as. GameExt honours AuthoredRatio, TrueWidescreen, ScreenAnchor and FillFrom; the stock game ignores those lines and stretches the HUD on a wide screen.">
+                        <ComboBoxItem Content="GameExt" />
+                        <ComboBoxItem Content="Vanilla" />
+                    </ComboBox>
+
+                    <TextBlock Text="Screen:" Foreground="#999" VerticalAlignment="Center" Margin="16,0,6,0" />
+                    <ComboBox x:Name="ScreenCombo" Width="150" SelectionChanged="ScreenCombo_SelectionChanged"
+                              ToolTip="The resolution the game draws at: the back buffer, or what Shader Patch's display scaling makes the game see (1280×720 on a 4K screen at 150%). &quot;Pixels&quot; values depend on it." />
+
+                    <TextBlock Text="Viewport:" Foreground="#999" VerticalAlignment="Center" Margin="16,0,6,0" />
+                    <ComboBox x:Name="ViewportCombo" SelectedIndex="0" Width="50" SelectionChanged="ViewportCombo_SelectionChanged"
+                              ToolTip="Whose screen group to show: elements whose top-level Viewport is this or 0.">
+                        <ComboBoxItem>1</ComboBoxItem>
+                        <ComboBoxItem>2</ComboBoxItem>
+                        <ComboBoxItem>3</ComboBoxItem>
+                        <ComboBoxItem>4</ComboBoxItem>
+                    </ComboBox>
+
+                    <CheckBox x:Name="RoundingBox" Content="Unit snapping" Foreground="#999" VerticalAlignment="Center" Margin="16,0,0,0"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="The draw snaps every element to a whole interface unit (1/640 of the width, 2 pixels at 1280 wide). The stock game always does; GameExt's HudSubPixel, on by default, turns it off. Switching game resets this to that game's default." />
+                    <CheckBox x:Name="ShowPlaceholdersBox" Content="Placeholders" IsChecked="True" Foreground="#999" VerticalAlignment="Center" Margin="12,0,0,0"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Outline elements that draw nothing here: missing textures, bitmaps without a BitmapRect, maps, targets and lists." />
+                    <CheckBox x:Name="GuidesBox" Content="Guides" IsChecked="True" Foreground="#999" VerticalAlignment="Center" Margin="12,0,0,0"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="The stock band a wide screen squashes the HUD into, or for a file GameExt lays out, its layout's thirds and how far each moves." />
+
+                    <TextBlock Text="Zoom:" Foreground="#999" VerticalAlignment="Center" Margin="16,0,6,0" />
+                    <TextBlock x:Name="ZoomText" Text="100%" Foreground="#ddd" VerticalAlignment="Center" MinWidth="44" />
+                    <Button Content="Fit" Click="Fit_Click" Padding="8,1" Margin="4,0,0,0" ToolTip="Fit the screen in the view. Ctrl+Wheel zooms." />
+                    <Button Content="1:1" Click="ActualSize_Click" Padding="8,1" Margin="4,0,0,0" ToolTip="One screen pixel to one display pixel." />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <TextBlock x:Name="LayoutInfoText" Foreground="#8fb8de" VerticalAlignment="Center" Margin="0,0,16,0"
+                               FontFamily="Consolas, Cascadia Mono, Menlo, monospace" />
+
+                    <CheckBox x:Name="ShowHiddenBox" Content="Show hidden" Foreground="#999" VerticalAlignment="Center" Margin="0,0,16,0"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="While simulating events, draw the elements their events have not enabled faintly, so they can still be picked." />
+
+                    <TextBlock Text="HUD scale:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <Slider x:Name="HudScaleSlider" Minimum="0.5" Maximum="1.5" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                            Width="90" VerticalAlignment="Center" ValueChanged="Slider_Changed"
+                            ToolTip="The runtime HUD scale (ScriptCB_SetHUDScale, set by the video options). It resizes only elements with Scalable(1), keeping their positions." />
+                    <TextBlock x:Name="HudScaleLabel" Text="1.00" Foreground="#ddd" VerticalAlignment="Center" MinWidth="32" Margin="4,0,12,0" />
+
+                    <TextBlock Text="Model size ×:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <Slider x:Name="MeshFactorSlider" Minimum="0.1" Maximum="5.0" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="False"
+                            Width="90" VerticalAlignment="Center" ValueChanged="Slider_Changed"
+                            ToolTip="Model3D sizes are still estimated (a mesh unit drawn as 1/7 of the width); positions are the game's. Tune this until models match their bitmaps." />
+                    <TextBlock x:Name="MeshFactorLabel" Text="1.00" Foreground="#ddd" VerticalAlignment="Center" MinWidth="32" Margin="4,0,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                      Background="#181818" PreviewMouseWheel="Scroller_PreviewMouseWheel">
+            <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Margin="40">
+                <Border x:Name="ViewportFrame" BorderBrush="#404040" BorderThickness="1">
+                    <Border.LayoutTransform>
+                        <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
+                    </Border.LayoutTransform>
+                    <!-- Dark grid: a 20-pixel tile in screen pixels. -->
+                    <Border.Background>
+                        <DrawingBrush TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
+                            <DrawingBrush.Drawing>
+                                <DrawingGroup>
+                                    <GeometryDrawing Brush="#2a2e33">
+                                        <GeometryDrawing.Geometry>
+                                            <RectangleGeometry Rect="0,0,20,20" />
+                                        </GeometryDrawing.Geometry>
+                                    </GeometryDrawing>
+                                    <GeometryDrawing>
+                                        <GeometryDrawing.Pen>
+                                            <Pen Brush="#353a40" Thickness="1" />
+                                        </GeometryDrawing.Pen>
+                                        <GeometryDrawing.Geometry>
+                                            <GeometryGroup>
+                                                <LineGeometry StartPoint="20,0" EndPoint="20,20" />
+                                                <LineGeometry StartPoint="0,20" EndPoint="20,20" />
+                                            </GeometryGroup>
+                                        </GeometryDrawing.Geometry>
+                                    </GeometryDrawing>
+                                </DrawingGroup>
+                            </DrawingBrush.Drawing>
+                        </DrawingBrush>
+                    </Border.Background>
+                    <Canvas x:Name="CanvasSurface" ClipToBounds="True" Background="Transparent"
+                        MouseLeftButtonDown="Canvas_MouseLeftButtonDown"
+                        MouseMove="Canvas_MouseMove"
+                        MouseLeftButtonUp="Canvas_MouseLeftButtonUp" />
+                </Border>
+            </Grid>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

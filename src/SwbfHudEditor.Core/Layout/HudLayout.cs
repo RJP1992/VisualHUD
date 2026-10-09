@@ -1,0 +1,533 @@
+using System.Numerics;
+using SwbfHudEditor.Core.Hud;
+
+namespace SwbfHudEditor.Core.Layout;
+
+/// <summary>
+/// Lays a <c>.hud</c> document out the way the game does: each element read and set up as its
+/// <c>PostReadSetup</c> does, GameExt's placement for an opted-in file, then the draw's matrices down
+/// to the screen. The rules and every address are in <c>docs/Engine.md</c>.
+/// </summary>
+public static class HudLayout
+{
+    private static readonly float[] AlignShare = { 0f, 0.5f, 1f };
+
+    /// <summary>
+    /// The elements at the top of a file, looking inside <c>ViewPort</c> blocks, whose scope the game
+    /// reads as the file's own (once per camera).
+    /// </summary>
+    public static IEnumerable<HudBlock> TopLevelElements(HudDocument doc) => TopLevelElements(doc.TopLevel);
+
+    private static IEnumerable<HudBlock> TopLevelElements(IEnumerable<HudBlock> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (ElementKinds.TryGet(block, out _)) yield return block;
+            else if (block.HasBody && block.Name.Equals("ViewPort", StringComparison.OrdinalIgnoreCase))
+                foreach (var inner in TopLevelElements(block.Children)) yield return inner;
+        }
+    }
+
+    public static HudLayoutResult Lay(HudDocument doc, LayoutOptions options)
+    {
+        var file = HudFileLayout.For(doc, options);
+        var ctx = new Context(options, file);
+
+        var roots = new List<LaidOutElement>();
+        foreach (var top in TopLevelElements(doc))
+            if (ElementKinds.TryGet(top, out var kind))
+                roots.Add(Build(ctx, top, kind, null, 0));
+
+        if (file.Opted) Place(ctx, roots);
+        foreach (var root in roots) ApplyTrackedMoves(ctx, root);
+
+        var groupWorld = ctx.Round(EngineMath.LetterboxMatrix(options.Screen) * EngineMath.ScreenGroupParent(options.Screen));
+        foreach (var root in roots)
+        {
+            var parent = !file.Opted ? groupWorld
+                : EngineMath.PixelParent(options.Screen, root.Role == PieceRole.Piece ? root.Slide : 0f);
+            Draw(ctx, root, parent);
+        }
+
+        var next = 0;
+        foreach (var e in DrawOrder(roots)) e.DrawIndex = next++;
+
+        return new HudLayoutResult
+        {
+            Options = options,
+            File = file,
+            Roots = roots,
+            ByBlock = ctx.ByBlock,
+            GroupWorld = groupWorld,
+        };
+    }
+
+    private sealed class Context(LayoutOptions options, HudFileLayout file)
+    {
+        public LayoutOptions Options { get; } = options;
+        public HudFileLayout File { get; } = file;
+        public HudScreen Screen => Options.Screen;
+        public Dictionary<HudBlock, LaidOutElement> ByBlock { get; } = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary><c>GetContainerViewWidth</c>: the screen with one viewport; GameExt's layout width for an opted-in file.</summary>
+        public float ViewWidth => File.LayoutWidth;
+        public float ViewHeight => Screen.HeightF;
+
+        /// <summary>The width <c>"Screen"</c> multiplies by: GameExt hands the conversion the layout width when the view is the layout.</summary>
+        public float ScreenModeWidth => File.Opted ? File.LayoutWidth : Screen.WidthF;
+
+        /// <summary><c>0.75 / GetScreenAspectRatio()</c>, which GameExt makes 1 for an opted-in element.</summary>
+        public float Stretch => File.Opted ? 1f : EngineMath.BitmapStretch(Screen);
+
+        public bool GameExt => Options.Target == HudTarget.GameExt;
+
+        public Matrix4x4 Round(Matrix4x4 m) => Options.RoundsToUnits ? EngineMath.RoundTranslation(m) : m;
+    }
+
+    // ---- Setup: what each element's PostReadSetup leaves ------------------------------------------
+
+    private static LaidOutElement Build(Context ctx, HudBlock block, ElementKind kind, LaidOutElement? parent, int depth)
+    {
+        var spec = ElementReader.Read(block, kind);
+        var group = NearestGroup(parent);
+        var e = new LaidOutElement
+        {
+            Spec = spec,
+            Parent = parent,
+            Depth = depth,
+            // HUD::Element::GetViewport asks the element's group, up to the top: a nested element's
+            // own Viewport line changes nothing.
+            Viewport = parent?.Viewport ?? spec.Viewport ?? 0,
+            ViewWidth = ctx.ViewWidth,
+            ViewHeight = ctx.ViewHeight,
+            ScreenWidth = ctx.ScreenModeWidth,
+            ScreenHeight = ctx.Screen.HeightF,
+            ScreenPixelsWide = ctx.Screen.WidthF,
+        };
+        e.InActiveViewport = e.Viewport == 0 || e.Viewport == ctx.Options.ActiveViewport;
+        var runtime = ctx.Options.Simulation?.For(block);
+        e.Runtime = runtime;
+        e.Enabled = ctx.Options.Simulation is null || runtime is { Enabled: true };
+        e.Shown = e.Enabled && (parent?.Shown ?? true);
+        e.Texture = runtime?.Texture ?? spec.Texture;
+        e.Text = runtime?.Text;
+        // GetContainerFrameWidth: the element's group's Rect in pixels, else the view.
+        e.FrameWidth = group?.RectWidthPixels ?? e.ViewWidth;
+        e.FrameHeight = group?.RectHeightPixels ?? e.ViewHeight;
+        ctx.ByBlock[block] = e;
+
+        if (ElementKinds.IsGroupBased(kind))
+        {
+            // ElementGroupBase::GetWidthPixelsFloat: the Rect in its own mode.
+            e.RectWidthPixels = EngineMath.ToPixels(spec.RectMode, spec.RectWidth, e.FrameWidth, e.ViewWidth, e.ScreenWidth);
+            e.RectHeightPixels = EngineMath.ToPixels(spec.RectMode, spec.RectHeight, e.FrameHeight, e.ViewHeight, e.ScreenHeight);
+        }
+
+        // HUD::Element::PostReadSetup: the position to pixels, the scale after the rotation.
+        var translation = new Vector3(
+            EngineMath.ToPixels(spec.PositionMode, spec.Position.X, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
+            EngineMath.ToPixels(spec.PositionMode, spec.Position.Y, e.FrameHeight, e.ViewHeight, e.ScreenHeight),
+            spec.Position.Z);
+        var local = EngineMath.LocalMatrix(EngineMath.Rotation(spec.Rotation.X, spec.Rotation.Y, spec.Rotation.Z),
+            spec.Scale, translation);
+
+        if (ElementKinds.IsGroupBased(kind))
+        {
+            // ElementGroupBase::PostReadSetup -> SetAlignment: the origin moves by -{0, 1/2, 1} of the Rect.
+            local.M41 -= AlignShare[(int)spec.RectHAlign] * e.RectWidthPixels;
+            local.M42 -= AlignShare[(int)spec.RectVAlign] * e.RectHeightPixels;
+        }
+
+        if (ElementKinds.IsBitmapBased(kind))
+        {
+            var quad = BitmapQuad(spec, e.FrameWidth, e.FrameHeight, e.ViewWidth, e.ViewHeight, e.ScreenWidth, e.ScreenHeight);
+            e.FullQuad = quad;
+            e.Uv = spec.TexCoords;
+            e.Quad = quad;
+            if (kind is ElementKind.BarBitmap or ElementKind.ProceduralBarBitmap) FillBar(ctx, e);
+            // The stock widening stretch on the bitmap's own axes.
+            local = EngineMath.ScaleOwnAxes(local, 1f, ctx.Stretch);
+        }
+
+        if (kind == ElementKind.Text && spec.HasTextBox)
+        {
+            // ElementText::ReadData: SetTextBox((int)(w * sViewportWidth), (int)(h * sViewportHeight)).
+            e.TextBoxWidth = (int)(spec.TextBoxWidth * e.ViewWidth);
+            e.TextBoxHeight = (int)(spec.TextBoxHeight * e.ViewHeight);
+        }
+
+        if (spec.Scalable && ctx.Options.HudScale != 1f)
+        {
+            // HUD::Element::SetRuntimeScale: the axes rescaled, the translation kept.
+            var s = ctx.Options.HudScale;
+            local.M11 *= s; local.M12 *= s; local.M13 *= s;
+            local.M21 *= s; local.M22 *= s; local.M23 *= s;
+            local.M31 *= s; local.M32 *= s; local.M33 *= s;
+        }
+
+        e.Local = local;
+        e.LoadLocal = local;
+
+        // Events that moved a group since: EventPosition, EventScale and EventRotation, in the order sent.
+        if (runtime is not null)
+            foreach (var move in runtime.Moves)
+            {
+                if (move.Kind == Events.GroupMoveKind.Position && ctx.File.Opted && IsTracked(move.Event))
+                    continue;   // placed once the slides are known (ApplyTrackedMoves)
+                e.Local = ApplyMove(e, e.Local, move, move.Value);
+            }
+
+        if (kind == ElementKind.Model3D)
+        {
+            e.Mesh = runtime?.Mesh ?? ctx.Options.ModelMesh?.Invoke(spec) ?? spec.Mesh ?? spec.MeshInfos.FirstOrDefault()?.Mesh;
+            var info = e.Mesh is null ? null
+                : spec.MeshInfos.FirstOrDefault(m => string.Equals(m.Mesh, e.Mesh, StringComparison.OrdinalIgnoreCase));
+            if (info is not null)
+            {
+                // ElementModel3D::PostReadSetup converts each MeshInfo with the element's sizes, and
+                // SetMesh hands the drawable that matrix in place of the element's.
+                e.MeshInfo = info;
+                e.Local = EngineMath.LocalMatrix(EngineMath.Rotation(info.Rotation.X, info.Rotation.Y, info.Rotation.Z), info.Scale,
+                    new Vector3(
+                        EngineMath.ToPixels(info.PositionMode, info.Position.X, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
+                        EngineMath.ToPixels(info.PositionMode, info.Position.Y, e.FrameHeight, e.ViewHeight, e.ScreenHeight),
+                        info.Position.Z));
+            }
+        }
+
+        // EventColor replaces the colour (its alpha is dropped); a group's EventAlpha replaces its alpha.
+        var c = runtime?.Color is { } rc ? new Vector3(rc.R, rc.G, rc.B) / 255f
+            : new Vector3(spec.Color.R, spec.Color.G, spec.Color.B) / 255f;
+        e.DrawColor = parent is null ? c : c * parent.DrawColor;
+        e.DrawAlpha = (runtime?.Alpha ?? spec.Alpha) * (parent is { Spec.PropagateAlpha: true } ? parent.DrawAlpha : 1f);
+
+        foreach (var child in spec.Children)
+            if (ElementKinds.TryGet(child, out var childKind))
+                e.Children.Add(Build(ctx, child, childKind, e, depth + 1));
+
+        if (kind == ElementKind.BarSegmented) LayOutSegments(ctx, e);
+        return e;
+    }
+
+    /// <summary>
+    /// A group's event moves (Phantom <c>ElementGroupBase::EventPosition</c> <c>005FB930</c>,
+    /// <c>EventScale</c> <c>005FBDE0</c>, <c>EventRotation</c> <c>005FBAC0</c>). A position is read in the
+    /// group's Rect mode, z as sent, and the Rect alignment applied again; a scale sets each of the
+    /// group's own axes to the length sent; a rotation is rebuilt X, Y, Z with the axes' lengths kept.
+    /// The translation survives a scale or rotation.
+    /// </summary>
+    private static Matrix4x4 ApplyMove(LaidOutElement e, Matrix4x4 m, Events.GroupMove move, Vector3 v)
+    {
+        var spec = e.Spec;
+        switch (move.Kind)
+        {
+            case Events.GroupMoveKind.Position:
+                m.M41 = EngineMath.ToPixels(spec.RectMode, v.X, e.FrameWidth, e.ViewWidth, e.ScreenWidth)
+                        - AlignShare[(int)spec.RectHAlign] * e.RectWidthPixels;
+                m.M42 = EngineMath.ToPixels(spec.RectMode, v.Y, e.FrameHeight, e.ViewHeight, e.ScreenHeight)
+                        - AlignShare[(int)spec.RectVAlign] * e.RectHeightPixels;
+                m.M43 = v.Z;
+                return m;
+            case Events.GroupMoveKind.Scale:
+            {
+                static Vector3 Unit(Vector3 a) => a.LengthSquared() > 0f ? Vector3.Normalize(a) : a;
+                var x = Unit(new Vector3(m.M11, m.M12, m.M13)) * v.X;
+                var y = Unit(new Vector3(m.M21, m.M22, m.M23)) * v.Y;
+                var z = Unit(new Vector3(m.M31, m.M32, m.M33)) * v.Z;
+                return new Matrix4x4(x.X, x.Y, x.Z, 0f, y.X, y.Y, y.Z, 0f, z.X, z.Y, z.Z, 0f, m.M41, m.M42, m.M43, 1f);
+            }
+            default:
+            {
+                var lengths = new Vector3(new Vector3(m.M11, m.M12, m.M13).Length(), new Vector3(m.M21, m.M22, m.M23).Length(),
+                    new Vector3(m.M31, m.M32, m.M33).Length());
+                var r = EngineMath.Rotation(v.X, v.Y, v.Z) * Matrix4x4.CreateScale(lengths);
+                r.M41 = m.M41;
+                r.M42 = m.M42;
+                r.M43 = m.M43;
+                return r;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The positions that follow the world. GameExt hands an opted-in element of these the fraction that
+    /// lands on the real point once laid out and slid (<c>tracked_fraction</c>).
+    /// </summary>
+    internal static bool IsTracked(string eventName)
+    {
+        var n = eventName.ToLowerInvariant();
+        if (n is "player1.weapon1.reticule.position" or "player1.weapon2.reticule.position" or "player1.weapon1.lockonposition"
+            or "player1.weapon2.lockonposition" or "player1.weapon1.target.position" or "player1.weapon2.target.position")
+            return true;
+        const string cp = "player1.commandpost";
+        if (!n.StartsWith(cp, StringComparison.Ordinal) || !n.EndsWith(".position", StringComparison.Ordinal)) return false;
+        var number = n[cp.Length..^".position".Length];
+        return int.TryParse(number, out var slot) && slot is >= 1 and <= 16;
+    }
+
+    private static void ApplyTrackedMoves(Context ctx, LaidOutElement e)
+    {
+        if (ctx.File.Opted && e.Runtime is { } runtime)
+        {
+            foreach (var move in runtime.Moves)
+            {
+                if (move.Kind != Events.GroupMoveKind.Position || !IsTracked(move.Event)) continue;
+                var slide = 0f;
+                for (var p = e; p is not null; p = p.Parent)
+                    if (p.Role == PieceRole.Piece) { slide = p.Slide; break; }
+                var x = TrueWidescreen.TrackedFraction(move.Value.X, ctx.Screen.WidthF, ctx.File.LayoutWidth, slide);
+                e.Local = ApplyMove(e, e.Local, move, move.Value with { X = x });
+            }
+        }
+        foreach (var child in e.Children) ApplyTrackedMoves(ctx, child);
+    }
+
+    private static LaidOutElement? NearestGroup(LaidOutElement? e)
+    {
+        for (; e is not null; e = e.Parent)
+            if (ElementKinds.IsGroupBased(e.Kind)) return e;
+        return null;
+    }
+
+    /// <summary>
+    /// <c>BitmapRect</c>'s quad: <c>SetRect(w, h, h-align, v-align)</c> puts it around the position
+    /// (Left 0..w, Center -w/2..w/2, Right -w..0), <c>ElementBitmapBase::PostReadSetup</c> converts its
+    /// corners to pixels in the rect's mode, and <c>RedBitmapElement::SetRect</c> rounds each edge.
+    /// Without a <c>BitmapRect</c> the quad is empty: a bitmap's size never comes from its texture.
+    /// </summary>
+    internal static QuadRect BitmapQuad(ElementSpec spec, float frameW, float frameH, float viewW, float viewH,
+        float screenW, float screenH)
+    {
+        if (!spec.HasBitmapRect) return new QuadRect(0f, 0f, 0f, 0f);
+        var w = spec.BitmapWidth;
+        var h = spec.BitmapHeight;
+        var l = -AlignShare[(int)spec.BitmapHAlign] * w;
+        var t = -AlignShare[(int)spec.BitmapVAlign] * h;
+        var mode = spec.BitmapMode;
+        return new QuadRect(
+            RoundEdge(EngineMath.ToPixels(mode, l, frameW, viewW, screenW)),
+            RoundEdge(EngineMath.ToPixels(mode, t, frameH, viewH, screenH)),
+            RoundEdge(EngineMath.ToPixels(mode, l + w, frameW, viewW, screenW)),
+            RoundEdge(EngineMath.ToPixels(mode, t + h, frameH, viewH, screenH)));
+    }
+
+    /// <summary><c>RedBitmapElement::SetRect</c> (M <c>00839130</c>): <c>floor(v + 0.5)</c>.</summary>
+    internal static float RoundEdge(float v) => (float)Math.Floor(v + 0.5f);
+
+    /// <summary>
+    /// A bar's quad. At load <c>ElementBar::PostReadSetup</c> calls <c>SetValue(Value)</c>, which
+    /// changes nothing while the value equals its fraction (the stock 0..1 range), so the bar draws
+    /// full until an event moves it. With another range the first fill runs against the
+    /// constructor's width and U span of 1, a stock quirk kept here.
+    /// </summary>
+    private static void FillBar(Context ctx, LaidOutElement e)
+    {
+        var spec = e.Spec;
+        var full = e.FullQuad!.Value;
+        var uv = spec.TexCoords;
+        var from = ctx.GameExt ? spec.FillFrom : FillFrom.Left;
+
+        // The load: ElementBarBitmap::SetValue (P 005F7920) compares the value as read with the
+        // fraction ElementBar::SetValue returns, and fills only if they differ.
+        var fraction = spec.BarFraction(spec.Value);
+        var quad = full;
+        var drawnUv = uv;
+        if (MathF.Abs(spec.Value - fraction) > 1e-4f)
+        {
+            if (spec.ScaleTexture) drawnUv = drawnUv with { U1 = fraction * 1f + uv.U0 };
+            if (spec.ScaleSize) quad = quad with { Right = RoundEdge(fraction * 1f + full.Left) };
+        }
+        // What PostReadSetup then keeps as the bar's width and U span, and GameExt as its full bar.
+        e.FullQuad = quad;
+        e.Quad = quad;
+        e.Uv = drawnUv;
+        e.BarFraction = fraction;
+
+        float? sentValue = e.Runtime?.BarValue;
+        if (sentValue is null && ctx.Options.BarValues is { } values && values.TryGetValue(e.Block, out var given)) sentValue = given;
+        if (sentValue is not { } sent) return;
+
+        // An event: the stock fill (and FillFrom("Right"), which reuses it) runs only for a fraction
+        // that differs from the value the bar holds; GameExt lays a vertical bar out every time.
+        var sentFraction = spec.BarFraction(sent);
+        e.BarFraction = sentFraction;
+        var vertical = from is FillFrom.Bottom or FillFrom.Top;
+        if (!vertical && !(MathF.Abs(spec.ClampValue(spec.Value) - sentFraction) > 1e-4f)) return;
+        var (rect, filledUv) = BarFill.Draw(quad, drawnUv, sentFraction, from, spec.ScaleTexture, spec.ScaleSize);
+        e.Quad = new QuadRect(RoundEdge(rect.Left), RoundEdge(rect.Top), RoundEdge(rect.Right), RoundEdge(rect.Bottom));
+        e.Uv = filledUv;
+    }
+
+    /// <summary>
+    /// <c>ElementBarSegmented::SetValue</c> (M <c>00696AB0</c>, P <c>005F8FF0</c>), run at load with the
+    /// bar's value: each lit segment's matrix replaced outright, in a row (x from 0 in steps of the
+    /// Rect's whole-pixel width / N) or round an ellipse in the Rect from <c>AngleStart</c>, rotated to
+    /// face out, its vertical radius stretched by the same factor bitmaps get. The template
+    /// <c>Segment</c> gives every segment its quad; the matrix it is given drops the template's own
+    /// position and the bitmap stretch.
+    /// </summary>
+    private static void LayOutSegments(Context ctx, LaidOutElement bar)
+    {
+        var spec = bar.Spec;
+        if (spec.SegmentTemplate is { } template)
+        {
+            var seg = ElementReader.Read(template, ElementKind.Bitmap);
+            bar.SegmentSpec = seg;
+            // The template's group is the bar: its Rect is the template's frame.
+            bar.SegmentQuad = BitmapQuad(seg, bar.RectWidthPixels, bar.RectHeightPixels, bar.ViewWidth, bar.ViewHeight,
+                bar.ScreenWidth, bar.ScreenHeight);
+        }
+
+        var n = spec.NumSegments;
+        if (n <= 0) return;
+        var value = bar.Runtime?.BarValue
+                    ?? (ctx.Options.BarValues is { } values && values.TryGetValue(bar.Block, out var sent) ? sent : spec.Value);
+        var f = spec.BarFraction(value);
+        bar.BarFraction = f;
+        var w = bar.RectWidthPixels;
+        var h = bar.RectHeightPixels;
+        var lit = 0;
+
+        if (!spec.Circular)
+        {
+            var step = (int)w / (float)n;
+            var end = w * f + 0f;
+            for (var x = 0f; x < end && lit < n; x += step, lit++)
+                bar.Segments.Add(new SegmentDraw(lit, true, Matrix4x4.CreateTranslation(x, 0f, 0f), default, default));
+        }
+        else
+        {
+            const float toRadians = MathF.PI / 180f;
+            var rx = w * 0.5f;
+            var ry = h * 0.5f;
+            var start = spec.AngleStart * toRadians;
+            var span = MathF.Abs(spec.AngleEnd * toRadians - start);
+            var step = span / n;
+            var end = span * f + start;
+            for (var a = start; a < end && lit < n; a += step, lit++)
+            {
+                var (s, c) = MathF.SinCos(a);
+                var m = Matrix4x4.CreateRotationZ(a);
+                m.M41 = s * rx + rx;
+                m.M42 = -(ctx.Stretch * c * ry) + ry;
+                bar.Segments.Add(new SegmentDraw(lit, true, m, default, default));
+            }
+        }
+        // The rest are disabled where they were last placed; at load that is nowhere.
+        for (var i = lit; i < n; i++)
+            bar.Segments.Add(new SegmentDraw(i, false, Matrix4x4.Identity, default, default));
+    }
+
+    // ---- GameExt's placement of an opted-in file ----------------------------------------------------
+
+    /// <summary>
+    /// <c>place()</c> in <c>hud_true_widescreen.cpp</c>: each top-level element by its translation in
+    /// layout pixels, then each child of a plain container.
+    /// </summary>
+    private static void Place(Context ctx, List<LaidOutElement> roots)
+    {
+        var width = ctx.Screen.WidthF;
+        var layout = ctx.File.LayoutWidth;
+        foreach (var root in roots)
+        {
+            if (root.Kind == ElementKind.Target)
+            {
+                root.Role = PieceRole.Target;   // ElementTarget places its markers on the real screen
+                continue;
+            }
+            Assign(root, true, width, layout);
+        }
+        foreach (var root in roots)
+        {
+            if (root.Role != PieceRole.Container) continue;
+            foreach (var child in root.Children) Assign(child, false, width, layout);
+        }
+    }
+
+    private static void Assign(LaidOutElement e, bool topLevel, float width, float layout)
+    {
+        var x = e.LoadLocal.M41;
+        var y = e.LoadLocal.M42;
+        var share = e.Spec.ScreenAnchorShare;
+        var at = TrueWidescreen.PlacementFor(x, y, topLevel, share, width, layout);
+        e.Role = at.Container ? PieceRole.Container : PieceRole.Piece;
+        e.Slide = at.Slide;
+        e.Third = at.Container || share is not null ? null : TrueWidescreen.AnchorFor(x, layout);
+    }
+
+    // ---- Draw order ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The order a group draws its children, back to front, as its child list holds them:
+    /// <c>RedGroupElement::AddElement</c> (P <c>008C3650</c>) puts a new child, at the drawable's starting
+    /// z-order of 128, after every child with an equal or higher one; then the child's <c>ZOrder</c> line
+    /// (<c>RedInterfaceElement::SetZOrder</c>, P <c>00891EE0</c>) moves it in front of the first with an
+    /// equal or lower one. The list runs from high z-order to low and is drawn from its head, so a lower
+    /// <c>ZOrder</c> draws on top.
+    /// </summary>
+    internal static IEnumerable<LaidOutElement> DrawOrder(IReadOnlyList<LaidOutElement> siblings)
+    {
+        const int startingZOrder = 128;
+        var list = new List<LaidOutElement>();
+        foreach (var e in siblings)
+        {
+            InsertAfterEqual(list, e, startingZOrder);
+            if (HasZOrderLine(e)) InsertBeforeEqual(list, e, e.Spec.ZOrder);
+        }
+        foreach (var e in list)
+        {
+            yield return e;
+            foreach (var d in DrawOrder(e.Children)) yield return d;
+        }
+    }
+
+    private static void InsertAfterEqual(List<LaidOutElement> list, LaidOutElement e, int z)
+    {
+        var i = 0;
+        while (i < list.Count && ZOf(list[i]) >= z) i++;
+        list.Insert(i, e);
+    }
+
+    private static void InsertBeforeEqual(List<LaidOutElement> list, LaidOutElement e, int z)
+    {
+        list.Remove(e);
+        var i = 0;
+        while (i < list.Count && z < ZOf(list[i])) i++;
+        list.Insert(i, e);
+    }
+
+    private static int ZOf(LaidOutElement e) => e.Spec.ZOrder;
+
+    private static bool HasZOrderLine(LaidOutElement e) =>
+        e.Block.Children.Any(c => !c.HasBody && c.Name == "ZOrder" && c.Arguments.Count > 0);
+
+    // ---- The draw ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The element draw (M <c>00816FA0</c>): its local matrix times the parent it is handed, rounded,
+    /// handed on to its children. GameExt hands a plain container's child the container's matrix with
+    /// the child's slide added.
+    /// </summary>
+    private static void Draw(Context ctx, LaidOutElement e, Matrix4x4 parentWorld)
+    {
+        var toScreen = EngineMath.UnitsToScreen(ctx.Screen);
+        e.ParentWorld = parentWorld;
+        e.World = ctx.Round(e.Local * parentWorld);
+        e.ToScreen = e.World * toScreen;
+
+        for (var i = 0; i < e.Segments.Count; i++)
+        {
+            var s = e.Segments[i];
+            var world = ctx.Round(s.Local * e.World);
+            e.Segments[i] = s with { World = world, ToScreen = world * toScreen };
+        }
+
+        var k = EngineMath.InterfaceWidth / ctx.Screen.WidthF;
+        foreach (var child in e.Children)
+        {
+            var pw = e.World;
+            if (e.Role == PieceRole.Container && child.Role == PieceRole.Piece) pw.M41 += child.Slide * k;
+            Draw(ctx, child, pw);
+        }
+    }
+}

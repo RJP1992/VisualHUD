@@ -1,0 +1,11 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+*.user
+.vs/
+
+# The project as it was handed over (zip), kept locally
+archive/
+
+# A windowed desktop capture from the original project: not a usable reference
+tools/stock_screenshot.png

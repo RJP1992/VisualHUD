@@ -1,20 +1,29 @@
 namespace SwbfHudEditor.Core.Assets;
 
+/// <summary>
+/// Finds the files a HUD names: in its own folders and the stock ones first, then in the asset
+/// folders added to it, which fill in what those do not have.
+/// </summary>
 public sealed class AssetResolver
 {
     private readonly List<string> _textureRoots = new();
     private readonly List<string> _meshRoots = new();
+    private readonly List<string> _fontRoots = new();
     private readonly List<string> _localizeRoots = new();
+    private readonly List<AssetFolderIndex> _folders = new();
 
     // Lazily-built filename-without-extension → full-path indexes. One per root, rebuilt when a root
     // is accessed for the first time. We recurse so mods that stash textures in subfolders (e.g.
     // interface/hud/, interface/ammo/) are still found.
     private readonly Dictionary<string, Dictionary<string, string>> _textureIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, string>> _meshIndex = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Dictionary<string, string>> _fontIndex = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<string> TextureRoots => _textureRoots;
     public IReadOnlyList<string> MeshRoots => _meshRoots;
+    public IReadOnlyList<string> FontRoots => _fontRoots;
     public IReadOnlyList<string> LocalizeRoots => _localizeRoots;
+    public IReadOnlyList<AssetFolderIndex> Folders => _folders;
 
     public void AddTextureRoot(string path)
     {
@@ -28,11 +37,20 @@ public sealed class AssetResolver
             _meshRoots.Add(path);
     }
 
+    public void AddFontRoot(string path)
+    {
+        if (Directory.Exists(path) && !_fontRoots.Contains(path, StringComparer.OrdinalIgnoreCase))
+            _fontRoots.Add(path);
+    }
+
     public void AddLocalizeRoot(string path)
     {
         if (Directory.Exists(path) && !_localizeRoots.Contains(path, StringComparer.OrdinalIgnoreCase))
             _localizeRoots.Add(path);
     }
+
+    /// <summary>An asset folder, searched with all its subfolders after every root, in the order added.</summary>
+    public void AddFolder(AssetFolderIndex folder) => _folders.Add(folder);
 
     public string? FindLocalizationCfg(string language = "english")
     {
@@ -41,26 +59,40 @@ public sealed class AssetResolver
             var candidate = Path.Combine(root, language + ".cfg");
             if (File.Exists(candidate)) return candidate;
         }
+        return InFolders(f => f.Localizations, language);
+    }
+
+    public string? FindTexture(string textureName) =>
+        InRoots(_textureRoots, "*.tga", _textureIndex, textureName) ?? InFolders(f => f.Textures, textureName);
+
+    public string? FindMesh(string meshName) =>
+        InRoots(_meshRoots, "*.msh", _meshIndex, meshName) ?? InFolders(f => f.Meshes, meshName);
+
+    /// <summary>A font by its <c>TextFont</c> name: the <c>.fff</c> file FontEdit saved.</summary>
+    public string? FindFont(string fontName) =>
+        InRoots(_fontRoots, "*.fff", _fontIndex, fontName) ?? InFolders(f => f.Fonts, fontName);
+
+    public string? Find(HudAssetKind kind, string name) => kind switch
+    {
+        HudAssetKind.Texture => FindTexture(name),
+        HudAssetKind.Mesh => FindMesh(name),
+        HudAssetKind.Font => FindFont(name),
+        HudAssetKind.Localization => FindLocalizationCfg(name),
+        _ => null,
+    };
+
+    private static string? InRoots(List<string> roots, string pattern,
+        Dictionary<string, Dictionary<string, string>> cache, string name)
+    {
+        foreach (var root in roots)
+            if (GetOrBuildIndex(root, pattern, cache).TryGetValue(name, out var path)) return path;
         return null;
     }
 
-    public string? FindTexture(string textureName)
+    private string? InFolders(Func<AssetFolderIndex, IReadOnlyDictionary<string, string>> files, string name)
     {
-        foreach (var root in _textureRoots)
-        {
-            var index = GetOrBuildIndex(root, "*.tga", _textureIndex);
-            if (index.TryGetValue(textureName, out var path)) return path;
-        }
-        return null;
-    }
-
-    public string? FindMesh(string meshName)
-    {
-        foreach (var root in _meshRoots)
-        {
-            var index = GetOrBuildIndex(root, "*.msh", _meshIndex);
-            if (index.TryGetValue(meshName, out var path)) return path;
-        }
+        foreach (var folder in _folders)
+            if (files(folder).TryGetValue(name, out var path)) return path;
         return null;
     }
 
@@ -89,9 +121,20 @@ public sealed class AssetResolver
         return idx;
     }
 
-    public static AssetResolver ForHudFile(string hudFilePath, string? stockDataCommonPath = null)
+    public static AssetResolver ForHudFile(string hudFilePath, string? stockDataCommonPath = null) =>
+        ForHudFiles(new[] { hudFilePath }, stockDataCommonPath);
+
+    /// <summary>The assets of a HUD made of several files: each file's folders, in load order, then the stock ones.</summary>
+    public static AssetResolver ForHudFiles(IEnumerable<string> hudFilePaths, string? stockDataCommonPath = null)
     {
         var resolver = new AssetResolver();
+        foreach (var path in hudFilePaths) AddRootsForHudFile(resolver, path);
+        if (stockDataCommonPath is not null) AddRootsForCommon(resolver, stockDataCommonPath);
+        return resolver;
+    }
+
+    private static void AddRootsForHudFile(AssetResolver resolver, string hudFilePath)
+    {
         // hud file lives at <root>/hud/<name>.hud. Textures can live in several places:
         //   hud/<subfolders>/  — mods often bundle their textures here (BF3-style HUDs nest
         //                        hud/soldier_bars/, hud/reticules/, hud/targeting/, etc.).
@@ -101,7 +144,7 @@ public sealed class AssetResolver
         //   effects/           — placeholder "white.tga" and similar solid-color tints used by
         //                        meshes like hud_weapon_backdrop.
         //   mshs/              — some meshes bundle their texture alongside the .msh
-        // Meshes come from mshs/. Localization from Localize/.
+        // Meshes come from mshs/, fonts from fonts/, localization from Localize/.
         var hudDir = Path.GetDirectoryName(hudFilePath);
         if (hudDir is not null)
         {
@@ -109,8 +152,6 @@ public sealed class AssetResolver
             var common = Path.GetDirectoryName(hudDir);
             if (common is not null) AddRootsForCommon(resolver, common);
         }
-        if (stockDataCommonPath is not null) AddRootsForCommon(resolver, stockDataCommonPath);
-        return resolver;
     }
 
     private static void AddRootsForCommon(AssetResolver resolver, string common)
@@ -119,6 +160,7 @@ public sealed class AssetResolver
         resolver.AddTextureRoot(Path.Combine(common, "effects"));
         resolver.AddTextureRoot(Path.Combine(common, "mshs"));
         resolver.AddMeshRoot(Path.Combine(common, "mshs"));
+        resolver.AddFontRoot(Path.Combine(common, "fonts"));
         resolver.AddLocalizeRoot(Path.Combine(common, "Localize"));
     }
 }

@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -18,6 +20,7 @@ public partial class MainWindow : Window
 {
     internal const string DefaultHudFolder = @"C:\BF2_ModTools\data\Common\hud";
     internal const string StockDataCommon = @"C:\BF2_ModTools\data\Common";
+    private const string HudFilter = "HUD files (*.hud)|*.hud|All files (*.*)|*.*";
 
     // Custom RoutedCommands so keybindings work regardless of which sub-control has focus.
     // The older PreviewKeyDown approach was getting swallowed by the TreeView's type-ahead
@@ -25,17 +28,40 @@ public partial class MainWindow : Window
     public static readonly RoutedCommand ToggleHideSelectedCommand = new("ToggleHideSelected", typeof(MainWindow));
     public static readonly RoutedCommand UnhideAllCommand = new("UnhideAll", typeof(MainWindow));
 
-    private HudDocument? _document;
+    // The open HUD: its files in load order, the transform files they need first. The game loads a
+    // HUD's files additively, so the tree has a node per file and Save writes each file with edits.
+    private readonly ObservableCollection<HudFile> _files = new();
+    // Transform files the user removed from the set, not to be loaded with it again.
+    private readonly HashSet<string> _declinedAutomatic = new(HudFileSet.PathComparer);
     private bool _suppressSyncBack;
-    private string? _currentPath;
+    private bool _closingForReload;
     private readonly UndoManager _undo = new();
     // The events sent in the Events tab: the game state the canvas draws while simulating.
     private readonly HudEventState _events = new();
+    // The lines saving leaves out as engine defaults, for the Properties panel; found again after a change.
+    private HashSet<HudBlock>? _defaultLines;
+    // Asset folders, kept in the user's settings and each read in the background with all its
+    // subfolders. A folder has an index once its scan has finished.
+    private readonly AppSettings _settings = AppSettings.Load();
+    private readonly Dictionary<string, AssetFolderIndex> _folderIndexes = new(HudFileSet.PathComparer);
+    private readonly Dictionary<string, string> _folderErrors = new(HudFileSet.PathComparer);
+    private readonly Dictionary<string, int> _scanGeneration = new(HudFileSet.PathComparer);
+    private readonly Dictionary<string, IReadOnlyList<string>> _meshTextures = new(StringComparer.OrdinalIgnoreCase);
+    private AssetResolver? _assets;
+    private bool _assetListStale = true;
 
     public MainWindow()
     {
         InitializeComponent();
-        _undo.Changed += (_, _) => UpdateTitle();
+        Tree.ItemsSource = _files;
+        Canvas.DocumentVisible = doc => FileOf(doc)?.IsVisible ?? true;
+        Properties.IsDefaultLine = line => (_defaultLines ??= FindDefaultLines()).Contains(line);
+        _undo.Changed += (_, _) =>
+        {
+            _defaultLines = null;
+            UpdateTitle();
+            RefreshAssetList();
+        };
         EventsList.Bind(_events);
         EventsList.SimulateChanged += (_, on) => Canvas.SetEventState(on ? _events : null);
         EventsList.ShowSelectedRequested += (_, _) => ShowSelectedInSimulation();
@@ -47,32 +73,52 @@ public partial class MainWindow : Window
             StatusText.Text = "Sent the on-foot events.";
         };
         Canvas.SimulationUpdated += (_, simulation) => EventsList.ShowSimulation(simulation);
+        AssetsList.AddFolderRequested += (_, _) => AddAssetFolders();
+        AssetsList.RemoveFolderRequested += (_, folder) => RemoveAssetFolder(folder);
+        AssetsList.RescanRequested += (_, _) =>
+        {
+            _meshTextures.Clear();
+            foreach (var folder in _settings.AssetFolders) ScanAssetFolder(folder);
+        };
+        ShowAssetFolders();
+        foreach (var folder in _settings.AssetFolders) ScanAssetFolder(folder);
     }
 
-    private void Open_Click(object sender, RoutedEventArgs e) => OpenFile();
-    private void Open_Executed(object sender, ExecutedRoutedEventArgs e) => OpenFile();
+    private IReadOnlyList<HudDocument> Documents => _files.Select(f => f.Document).ToList();
+    private IEnumerable<HudFile> UserFiles => _files.Where(f => !f.AddedAutomatically);
+
+    private void Open_Click(object sender, RoutedEventArgs e) => OpenFiles();
+    private void Open_Executed(object sender, ExecutedRoutedEventArgs e) => OpenFiles();
+    private void AddFiles_Click(object sender, RoutedEventArgs e) => AddFiles();
+    private void RemoveFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedFile is { } file) RemoveFile(file);
+        else StatusText.Text = "Select a file, or an element in it, to remove it from the HUD.";
+    }
+    private void AddAssetFolder_Click(object sender, RoutedEventArgs e) => AddAssetFolders();
     private void Reload_Click(object sender, RoutedEventArgs e) => ReloadCurrent();
     private void Reload_Executed(object sender, ExecutedRoutedEventArgs e) => ReloadCurrent();
-    private void Reload_CanExecute(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = !string.IsNullOrEmpty(_currentPath);
+    private void Reload_CanExecute(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = UserFiles.Any(f => f.FilePath is not null);
 
     /// <summary>
-    /// Restart the entire editor process, re-opening the currently loaded file. The current
-    /// window is closed after the new instance has been started so there's no dead window on
-    /// screen. Use this when a code change or asset refresh needs a clean slate instead of a
-    /// soft in-place reload.
+    /// Restart the entire editor process, re-opening the HUD's files. The current window is closed
+    /// after the new instance has been started so there's no dead window on screen. Use this when a
+    /// code change or asset refresh needs a clean slate instead of a soft in-place reload.
     /// </summary>
     private void ReloadCurrent()
     {
-        if (string.IsNullOrEmpty(_currentPath)) return;
-        if (!File.Exists(_currentPath))
+        var paths = UserFiles.Select(f => f.FilePath).OfType<string>().ToList();
+        if (paths.Count == 0) return;
+        var missing = paths.Where(p => !File.Exists(p)).ToList();
+        if (missing.Count > 0)
         {
-            MessageBox.Show(this, $"File no longer exists:\n{_currentPath}", "Reload failed",
+            MessageBox.Show(this, $"File no longer exists:\n{string.Join("\n", missing)}", "Reload failed",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        if (!ConfirmDiscard("reloading")) return;
 
-        // Our own exe + the current path as a cli argument. The Window_Loaded hook already
-        // reads args[1] and calls LoadFile, so the new process opens the same document.
+        // Our own exe + the files as cli arguments. Window_Loaded opens every file it is given, in order.
         var exePath = Environment.ProcessPath ?? System.Reflection.Assembly.GetEntryAssembly()?.Location;
         if (string.IsNullOrEmpty(exePath))
         {
@@ -85,7 +131,7 @@ public partial class MainWindow : Window
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = $"\"{_currentPath}\"",
+                Arguments = string.Join(" ", paths.Select(p => $"\"{p}\"")),
                 UseShellExecute = false,
                 WorkingDirectory = Path.GetDirectoryName(exePath) ?? Environment.CurrentDirectory,
             });
@@ -96,107 +142,408 @@ public partial class MainWindow : Window
                 "Reload failed", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        _closingForReload = true;
         Application.Current.Shutdown();
     }
-    private void Save_Click(object sender, RoutedEventArgs e) => Save();
-    private void Save_Executed(object sender, ExecutedRoutedEventArgs e) => Save();
+    private void Save_Click(object sender, RoutedEventArgs e) => SaveAll();
+    private void Save_Executed(object sender, ExecutedRoutedEventArgs e) => SaveAll();
     private void SaveAs_Click(object sender, RoutedEventArgs e) => SaveAs();
     private void SaveAs_Executed(object sender, ExecutedRoutedEventArgs e) => SaveAs();
-    private void Save_CanExecute(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _document is not null;
+    private void Save_CanExecute(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _files.Count > 0;
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        var args = Environment.GetCommandLineArgs();
-        if (args.Length >= 2 && File.Exists(args[1]))
-            LoadFile(args[1]);
+        var paths = Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToList();
+        if (paths.Count > 0) LoadFiles(paths);
     }
 
-    private void OpenFile()
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        if (!_closingForReload && !ConfirmDiscard("closing")) e.Cancel = true;
+    }
+
+    // ── Files ────────────────────────────────────────────────────────────────────────
+
+    private void OpenFiles()
     {
         var dialog = new OpenFileDialog
         {
-            Filter = "HUD files (*.hud)|*.hud|All files (*.*)|*.*",
-            InitialDirectory = Directory.Exists(DefaultHudFolder) ? DefaultHudFolder : null,
+            Filter = HudFilter,
+            Multiselect = true,
+            Title = "Open the files of a HUD",
+            InitialDirectory = StartFolder(),
         };
-
         if (dialog.ShowDialog(this) != true) return;
-        LoadFile(dialog.FileName);
+        if (!ConfirmDiscard("opening other files")) return;
+        LoadFiles(dialog.FileNames.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase));
     }
 
-    private void LoadFile(string path)
+    private string? StartFolder() =>
+        UserFiles.Select(f => Path.GetDirectoryName(f.FilePath)).FirstOrDefault(Directory.Exists)
+        ?? (Directory.Exists(DefaultHudFolder) ? DefaultHudFolder : null);
+
+    /// <summary>Open these files as the HUD, in this load order, with the transform files they need.</summary>
+    private void LoadFiles(IEnumerable<string> paths)
     {
-        try
+        var loaded = new List<HudFile>();
+        foreach (var path in paths.Select(Path.GetFullPath).Distinct(HudFileSet.PathComparer))
         {
-            var src = File.ReadAllText(path);
-            var doc = HudParser.Parse(src, path);
-            _document = doc;
-            _currentPath = path;
-            _undo.Clear();
-            var assets = AssetResolver.ForHudFile(path, Directory.Exists(StockDataCommon) ? StockDataCommon : null);
-            var localization = TryLoadLocalization(assets);
-            var transforms = TryLoadTransformDocuments(path);
-            // The tree is the file itself: its top-level blocks in order, each holding its elements.
-            Tree.ItemsSource = ElementsOnlyConverter.View(doc.TopLevel);
-            Canvas.LoadDocument(doc, assets, localization, transforms);
-            RefreshEventList();
-            Properties.SetBlock(null);
-            UpdateTitle();
-            var locStatus = localization is null ? "no localize" : $"{localization.Count} strings";
-            var transformCount = Canvas.Transforms?.Nodes.Count ?? 0;
-            var xformStatus = transforms.Count == 0 && transformCount == 0 ? "no transforms"
-                : $"{transformCount} transforms from {transforms.Count + 1} file{(transforms.Count == 0 ? "" : "s")}";
-            StatusText.Text = $"{path}    {CountBlocks(doc.TopLevel)} blocks    {locStatus}    {xformStatus}";
+            try { loaded.Add(new HudFile(HudFileSet.Parse(path), path)); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"{path}\n\n{ex.Message}", "Failed to open file", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Failed to open file", MessageBoxButton.OK, MessageBoxImage.Error);
-            StatusText.Text = $"Failed to open {Path.GetFileName(path)}: {ex.Message}";
-        }
+        if (loaded.Count == 0) return;
+        _files.Clear();
+        _declinedAutomatic.Clear();
+        foreach (var file in loaded) _files.Add(file);
+        SyncAutomaticFiles();
+        _undo.Clear();
+        AfterSetChanged();
     }
 
-    private void Save()
+    /// <summary>Add files to the open HUD, loaded after its files, as the game adds a mod's HUD files.</summary>
+    private void AddFiles()
     {
-        if (_document is null) return;
-        if (string.IsNullOrEmpty(_currentPath)) { SaveAs(); return; }
-        WriteToPath(_currentPath);
+        if (_files.Count == 0)
+        {
+            OpenFiles();
+            return;
+        }
+        var dialog = new OpenFileDialog
+        {
+            Filter = HudFilter,
+            Multiselect = true,
+            Title = "Add files to the HUD",
+            InitialDirectory = StartFolder(),
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        var added = new List<string>();
+        foreach (var path in dialog.FileNames.Select(Path.GetFullPath).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (FileAt(path) is { } open)
+            {
+                // A transform file the HUD already loads becomes one the user opened.
+                if (open.AddedAutomatically)
+                {
+                    open.AddedAutomatically = false;
+                    added.Add(open.Name);
+                }
+                continue;
+            }
+            try
+            {
+                _files.Add(new HudFile(HudFileSet.Parse(path), path));
+                added.Add(Path.GetFileName(path));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"{path}\n\n{ex.Message}", "Failed to open file", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        if (added.Count == 0) return;
+        SyncAutomaticFiles();
+        AfterSetChanged($"Added {string.Join(", ", added)}");
     }
 
+    /// <summary>Take a file out of the HUD. The file on disk is not changed.</summary>
+    private void RemoveFile(HudFile file)
+    {
+        file.Refresh();
+        if (file.IsModified && MessageBox.Show(this,
+                $"{file.Name} has unsaved changes. Remove it from the HUD anyway? The file on disk is not changed.",
+                "Remove file", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        _files.Remove(file);
+        if (file.AddedAutomatically && file.FilePath is { } path) _declinedAutomatic.Add(Path.GetFullPath(path));
+        SyncAutomaticFiles();
+        AfterSetChanged($"Removed {file.Name} from the HUD; the file on disk is unchanged.");
+    }
+
+    /// <summary>
+    /// Bring the transform files loaded with the HUD in line with its files: the ones now needed join
+    /// ahead of the files, and unedited ones no longer needed leave.
+    /// </summary>
+    private void SyncAutomaticFiles()
+    {
+        var own = UserFiles.Select(f => f.FilePath).OfType<string>().ToList();
+        var wanted = HudFileSet.TransformFilesFor(own).Where(p => !_declinedAutomatic.Contains(p)).ToList();
+        for (var i = _files.Count - 1; i >= 0; i--)
+        {
+            var file = _files[i];
+            if (!file.AddedAutomatically) continue;
+            file.Refresh();
+            if (!file.IsModified && !wanted.Contains(Path.GetFullPath(file.FilePath!), HudFileSet.PathComparer)) _files.RemoveAt(i);
+        }
+        var at = 0;
+        foreach (var path in wanted)
+        {
+            var index = IndexOfPath(path);
+            if (index >= 0)
+            {
+                at = Math.Max(at, index + 1);
+                continue;
+            }
+            if (HudFileSet.TryParse(path) is { } doc) _files.Insert(at++, new HudFile(doc, path, addedAutomatically: true));
+        }
+    }
+
+    private int IndexOfPath(string path)
+    {
+        for (var i = 0; i < _files.Count; i++)
+            if (_files[i].FilePath is { } p && HudFileSet.PathComparer.Equals(Path.GetFullPath(p), path)) return i;
+        return -1;
+    }
+
+    private HudFile? FileAt(string path) => IndexOfPath(path) is var i and >= 0 ? _files[i] : null;
+
+    /// <summary>After the files of the HUD change: assets, the canvas and the Events tab over all of them.</summary>
+    private void AfterSetChanged(string? status = null)
+    {
+        _defaultLines = null;
+        var localization = LoadAssets();
+        RefreshEventList();
+        Properties.SetBlock(null);
+        UpdateTitle();
+        if (status is not null)
+        {
+            StatusText.Text = status;
+            return;
+        }
+        var user = UserFiles.ToList();
+        var what = user.Count == 1 ? user[0].FilePath : $"{user.Count} files";
+        var locStatus = localization is null ? "no localize" : $"{localization.Count} strings";
+        var transformCount = Canvas.Transforms?.Nodes.Count ?? 0;
+        StatusText.Text = $"{what}    {CountBlocks(Documents.SelectMany(d => d.TopLevel))} blocks    {locStatus}    " +
+                          $"{transformCount} transforms from {_files.Count} file{(_files.Count == 1 ? "" : "s")}";
+    }
+
+    // ── Assets ───────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Find the HUD's assets again: in its folders, the stock ones, then the asset folders read so
+    /// far, and draw with them.
+    /// </summary>
+    private LocalizationTable? LoadAssets()
+    {
+        _assets = ResolverFor(UserFiles.Select(f => f.FilePath).OfType<string>(), ReadAssetFolders());
+        var localization = TryLoadLocalization(_assets);
+        Canvas.LoadDocuments(Documents, _assets, localization);
+        RefreshAssetList();
+        return localization;
+    }
+
+    /// <summary>The asset folders whose scan has finished, in the order they were added.</summary>
+    private IEnumerable<AssetFolderIndex> ReadAssetFolders() =>
+        _settings.AssetFolders.Where(_folderIndexes.ContainsKey).Select(f => _folderIndexes[f]);
+
+    /// <summary>The resolver for a HUD's files: their folders, the stock ones, then these asset folders.</summary>
+    internal static AssetResolver ResolverFor(IEnumerable<string> hudPaths, IEnumerable<AssetFolderIndex> folders)
+    {
+        var resolver = AssetResolver.ForHudFiles(hudPaths, Directory.Exists(StockDataCommon) ? StockDataCommon : null);
+        foreach (var folder in folders) resolver.AddFolder(folder);
+        return resolver;
+    }
+
+    /// <summary>Check the HUD's assets again in the Assets tab, or when it is next opened.</summary>
+    private void RefreshAssetList()
+    {
+        _assetListStale = true;
+        if (!AssetsTab.IsSelected) return;
+        _assetListStale = false;
+        AssetsList.ShowAssets(_files.Count == 0 || _assets is null ? null : HudAssets.Check(Documents, _assets, _meshTextures));
+    }
+
+    private void LeftTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // The lists and boxes inside the tabs raise this too.
+        if (!ReferenceEquals(e.OriginalSource, LeftTabs)) return;
+        if (AssetsTab.IsSelected && _assetListStale) RefreshAssetList();
+    }
+
+    private void AddAssetFolders()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Add asset folders: searched with all their subfolders for missing textures, meshes, fonts and localization",
+            Multiselect = true,
+            InitialDirectory = _settings.AssetFolders.LastOrDefault(Directory.Exists) ?? StartFolder(),
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        LeftTabs.SelectedItem = AssetsTab;
+        var added = new List<string>();
+        foreach (var folder in dialog.FolderNames.Select(Path.GetFullPath))
+        {
+            if (_settings.AssetFolders.Contains(folder, HudFileSet.PathComparer)) continue;
+            _settings.AssetFolders.Add(folder);
+            added.Add(folder);
+        }
+        if (added.Count == 0)
+        {
+            StatusText.Text = "Those folders are already asset folders.";
+            return;
+        }
+        if (_settings.Save() is { } error) StatusText.Text = $"Could not save the settings: {error}";
+        foreach (var folder in added) ScanAssetFolder(folder);
+    }
+
+    private void RemoveAssetFolder(string folder)
+    {
+        _settings.AssetFolders.RemoveAll(f => HudFileSet.PathComparer.Equals(f, folder));
+        _folderIndexes.Remove(folder);
+        _folderErrors.Remove(folder);
+        var error = _settings.Save();
+        ShowAssetFolders();
+        if (_files.Count > 0) LoadAssets();
+        StatusText.Text = error is null ? $"No longer searching {folder}." : $"Could not save the settings: {error}";
+    }
+
+    /// <summary>Read an asset folder with all its subfolders away from the window, then draw with what it holds.</summary>
+    private async void ScanAssetFolder(string folder)
+    {
+        var generation = _scanGeneration.GetValueOrDefault(folder) + 1;
+        _scanGeneration[folder] = generation;
+        _folderIndexes.Remove(folder);
+        _folderErrors.Remove(folder);
+        ShowAssetFolders();
+        StatusText.Text = $"Scanning {folder}...";
+
+        AssetFolderIndex? index = null;
+        string? error = null;
+        try { index = await Task.Run(() => AssetFolderIndex.Scan(folder)); }
+        catch (Exception ex) { error = ex.Message; }
+
+        // Removed, or scanned again, in the meantime.
+        if (!_settings.AssetFolders.Contains(folder, HudFileSet.PathComparer) || _scanGeneration[folder] != generation) return;
+        if (index is null)
+        {
+            _folderErrors[folder] = error ?? "unknown error";
+            ShowAssetFolders();
+            StatusText.Text = $"Could not read {folder}: {error}";
+            return;
+        }
+        _folderIndexes[folder] = index;
+        ShowAssetFolders();
+        if (_files.Count > 0) LoadAssets();
+        StatusText.Text = $"Scanned {folder}: {Describe(index)}.";
+    }
+
+    private void ShowAssetFolders() => AssetsList.ShowFolders(_settings.AssetFolders.Select(folder => new AssetFolderRow(folder,
+        _folderErrors.TryGetValue(folder, out var error) ? $"could not be read: {error}"
+        : _folderIndexes.TryGetValue(folder, out var index) ? (Directory.Exists(folder) ? Describe(index) : "not found")
+        : "scanning...")).ToList());
+
+    private static string Describe(AssetFolderIndex index) =>
+        $"{index.Textures.Count:N0} textures, {index.Meshes.Count:N0} meshes, {index.Fonts.Count:N0} fonts in {index.FileCount:N0} files";
+
+    /// <summary>Ask about unsaved edits before they would be lost; false to stay.</summary>
+    private bool ConfirmDiscard(string doing)
+    {
+        foreach (var file in _files) file.Refresh();
+        var modified = _files.Where(f => f.IsModified).Select(f => f.Name).ToList();
+        if (modified.Count == 0) return true;
+        var answer = MessageBox.Show(this, $"Save the changes to {string.Join(", ", modified)} before {doing}?",
+            "Unsaved changes", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        return answer switch
+        {
+            MessageBoxResult.Yes => SaveAll(),
+            MessageBoxResult.No => true,
+            _ => false,
+        };
+    }
+
+    /// <summary>Write every file with unsaved edits. False if one was not saved.</summary>
+    private bool SaveAll()
+    {
+        var saved = new List<string>();
+        foreach (var file in _files.ToList())
+        {
+            file.Refresh();
+            if (!file.IsModified) continue;
+            var written = file.FilePath is { } path ? WriteFile(file, path) : SaveFileAs(file);
+            if (!written) return false;
+            saved.Add(file.Name);
+        }
+        UpdateTitle();
+        StatusText.Text = saved.Count == 0 ? "No unsaved changes." : $"Saved {string.Join(", ", saved)}";
+        return true;
+    }
+
+    /// <summary>Save the selection's file under a new name.</summary>
     private void SaveAs()
     {
-        if (_document is null) return;
-        var dialog = new SaveFileDialog
-        {
-            Filter = "HUD files (*.hud)|*.hud|All files (*.*)|*.*",
-            FileName = _currentPath is null ? "untitled.hud" : Path.GetFileName(_currentPath),
-            InitialDirectory = _currentPath is null ? null : Path.GetDirectoryName(_currentPath),
-        };
-        if (dialog.ShowDialog(this) != true) return;
-        WriteToPath(dialog.FileName);
-        _currentPath = dialog.FileName;
-        UpdateTitle();
+        if (ActiveFile is { } file && SaveFileAs(file)) StatusText.Text = $"Saved to {file.FilePath}";
     }
 
-    private void WriteToPath(string path)
+    private bool SaveFileAs(HudFile file)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = HudFilter,
+            FileName = file.FilePath is null ? "untitled.hud" : file.Name,
+            InitialDirectory = Path.GetDirectoryName(file.FilePath),
+        };
+        if (dialog.ShowDialog(this) != true) return false;
+        if (!WriteFile(file, dialog.FileName)) return false;
+        file.FilePath = dialog.FileName;
+        file.AddedAutomatically = false;
+        UpdateTitle();
+        return true;
+    }
+
+    private bool WriteFile(HudFile file, string path)
     {
         try
         {
-            File.WriteAllText(path, HudWriter.Write(_document!));
-            _undo.MarkSaved();
-            UpdateTitle();
-            StatusText.Text = $"Saved to {path}";
+            // Lines that only restate the engine's defaults are left out of the file.
+            File.WriteAllText(path, ElementDefaults.WriteWithoutDefaults(file.Document));
+            file.MarkSaved();
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Save failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, $"{path}\n\n{ex.Message}", "Save failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
+    }
+
+    private HashSet<HudBlock> FindDefaultLines()
+    {
+        var lines = new HashSet<HudBlock>(ReferenceEqualityComparer.Instance);
+        foreach (var file in _files) lines.UnionWith(ElementDefaults.RedundantLines(file.Document));
+        return lines;
     }
 
     private void UpdateTitle()
     {
-        var name = _currentPath is null ? "(unsaved)" : Path.GetFileName(_currentPath);
-        Title = $"VisualHUD — {name}{(_undo.IsDirty ? " *" : "")}";
+        foreach (var file in _files) file.Refresh();
+        var user = UserFiles.ToList();
+        var name = user.Count == 0 ? "(no file)" : user[0].Name + (user.Count > 1 ? $" (+{user.Count - 1})" : string.Empty);
+        Title = $"VisualHUD — {name}{(_files.Any(f => f.IsModified) ? " *" : "")}";
     }
+
+    /// <summary>The file holding a block, with the blocks from the top of that file down to it.</summary>
+    private (HudFile File, IReadOnlyList<HudBlock> Path)? Locate(HudBlock block)
+    {
+        foreach (var file in _files)
+            if (file.Document.FindPathTo(block) is { } path) return (file, path);
+        return null;
+    }
+
+    private HudFile? FileOf(HudBlock block) => Locate(block)?.File;
+    private HudFile? FileOf(HudDocument doc) => _files.FirstOrDefault(f => ReferenceEquals(f.Document, doc));
+
+    private HudFile? SelectedFile => Tree.SelectedItem switch
+    {
+        HudFile file => file,
+        HudBlock block => FileOf(block),
+        _ => null,
+    };
+
+    /// <summary>The file an action without a block works on: the selection's, else the first the user opened.</summary>
+    private HudFile? ActiveFile => SelectedFile ?? UserFiles.FirstOrDefault() ?? _files.FirstOrDefault();
 
     private void Properties_PropertyEdited(object? sender, PropertyEditedEventArgs e)
     {
@@ -204,6 +551,7 @@ public partial class MainWindow : Window
         _undo.Push(edit);
         Canvas.Refresh();
         RefreshEventList();
+        Properties.RefreshDefaultMarks();
     }
 
     /// <summary>The Properties panel's delete button: remove that line, as an undoable edit.</summary>
@@ -221,10 +569,10 @@ public partial class MainWindow : Window
 
     // ── Events ───────────────────────────────────────────────────────────────────────
 
-    /// <summary>List the events the document and its transforms use in the Events tab.</summary>
+    /// <summary>List the events the HUD's files and their transforms use in the Events tab.</summary>
     private void RefreshEventList()
     {
-        if (_document is null || Canvas.Transforms is not { } graph) return;
+        if (_files.Count == 0 || Canvas.Transforms is not { } graph) return;
         var meshes = graph.Nodes.OfType<NameMeshNode>().SelectMany(n => n.Rows.Select(r => r.Mesh))
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
         IReadOnlyList<string> Suggest(HudEventUse use)
@@ -244,7 +592,7 @@ public partial class MainWindow : Window
                 _ => Array.Empty<string>(),
             };
         }
-        EventsList.SetEvents(HudEventUsage.Of(_document, graph), Suggest);
+        EventsList.SetEvents(HudEventUsage.Of(Documents, graph), Suggest);
     }
 
     /// <summary>
@@ -253,9 +601,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowSelectedInSimulation()
     {
-        if (_document is null || Tree.SelectedItem is not HudBlock block || _document.FindPathTo(block) is not { } path) return;
+        if (Tree.SelectedItem is not HudBlock block || Locate(block) is not { } at) return;
         var sends = new List<(string, HudEventValue)>();
-        foreach (var b in path)
+        foreach (var b in at.Path)
         {
             if (!ElementKinds.TryGet(b, out var kind)) continue;
             if (ElementReader.Read(b, kind).EventEnable is not { } name) continue;
@@ -307,6 +655,13 @@ public partial class MainWindow : Window
     {
         var block = e.NewValue as HudBlock;
         Properties.SetBlock(block);
+        // The guides and the layout line follow the selection's file.
+        if (SelectedFile is { } file)
+        {
+            Canvas.ActiveDocument = file.Document;
+            if (e.NewValue is HudFile)
+                StatusText.Text = $"{file.FilePath ?? file.Name}    {Canvas.DescribeFile(file.Document)}";
+        }
         if (_suppressSyncBack) return;
         Canvas.HighlightBlock(block);
     }
@@ -392,23 +747,37 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>H keybinding — toggles the selected block's visibility on the canvas.</summary>
+    /// <summary>H keybinding — toggles the selected block's, or file's, visibility on the canvas.</summary>
     private void ToggleHideSelected_Executed(object sender, ExecutedRoutedEventArgs e)
     {
         if (Keyboard.FocusedElement is TextBoxBase) return;
-        if (Tree.SelectedItem is not HudBlock block) return;
-        block.IsVisible = !block.IsVisible;
+        switch (Tree.SelectedItem)
+        {
+            case HudBlock block:
+                block.IsVisible = !block.IsVisible;
+                StatusText.Text = $"{(block.IsVisible ? "Shown" : "Hidden")}: {block.Name} \"{FirstName(block)}\"";
+                break;
+            case HudFile file:
+                file.IsVisible = !file.IsVisible;
+                StatusText.Text = $"{(file.IsVisible ? "Shown" : "Hidden")}: {file.Name}";
+                break;
+            default:
+                return;
+        }
         Canvas.Refresh();
-        StatusText.Text = $"{(block.IsVisible ? "Shown" : "Hidden")}: {block.Name} \"{FirstName(block)}\"";
         e.Handled = true;
     }
 
-    /// <summary>Alt+H keybinding — unhides every hidden block.</summary>
+    /// <summary>Alt+H keybinding — unhides every hidden block and file.</summary>
     private void UnhideAll_Executed(object sender, ExecutedRoutedEventArgs e)
     {
         if (Keyboard.FocusedElement is TextBoxBase) return;
-        if (_document is null) return;
-        var count = UnhideAll(_document.TopLevel);
+        var count = 0;
+        foreach (var file in _files)
+        {
+            if (!file.IsVisible) { file.IsVisible = true; count++; }
+            count += UnhideAll(file.Document.TopLevel);
+        }
         Canvas.Refresh();
         StatusText.Text = count > 0 ? $"Unhid {count} element{(count == 1 ? "" : "s")}." : "Nothing was hidden.";
         e.Handled = true;
@@ -429,10 +798,16 @@ public partial class MainWindow : Window
 
     private void DeleteSelected_Click(object sender, RoutedEventArgs e) => DeleteSelected();
 
+    /// <summary>Delete the selected block, or take the selected file out of the HUD.</summary>
     private void DeleteSelected()
     {
-        if (_document is null || Tree.SelectedItem is not HudBlock block) return;
-        var container = _document.FindContainer(block);
+        if (Tree.SelectedItem is HudFile file)
+        {
+            RemoveFile(file);
+            return;
+        }
+        if (Tree.SelectedItem is not HudBlock block || FileOf(block) is not { } owner) return;
+        var container = owner.Document.FindContainer(block);
         if (container is null) return;
         var (list, index, parent) = container.Value;
 
@@ -458,9 +833,10 @@ public partial class MainWindow : Window
     private void InsertTopLevel_Text_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewText(UniqueName("new_text")));
     private void InsertTopLevel_Model3D_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewModel3D(UniqueName("new_model3d")));
 
+    /// <summary>Insert into the selected block, or at the top of the selected file.</summary>
     private void InsertChildOfSelected(HudBlock newBlock)
     {
-        if (_document is null || Tree.SelectedItem is not HudBlock parent)
+        if (Tree.SelectedItem is not HudBlock parent)
         {
             InsertTopLevel(newBlock);
             return;
@@ -478,12 +854,14 @@ public partial class MainWindow : Window
         AfterStructuralInsert(newBlock);
     }
 
+    /// <summary>Insert at the end of the selection's file.</summary>
     private void InsertTopLevel(HudBlock newBlock)
     {
-        if (_document is null) return;
-        var index = _document.TopLevel.Count;
-        _document.TopLevel.Insert(index, newBlock);
-        var edit = new InsertBlockEdit(_document.TopLevel, index, newBlock, $"insert top-level {newBlock.Name}", affected: newBlock);
+        if (ActiveFile is not { } file) return;
+        var topLevel = file.Document.TopLevel;
+        var index = topLevel.Count;
+        topLevel.Insert(index, newBlock);
+        var edit = new InsertBlockEdit(topLevel, index, newBlock, $"insert top-level {newBlock.Name}", affected: newBlock);
         _undo.Push(edit);
         AfterStructuralInsert(newBlock);
     }
@@ -499,11 +877,11 @@ public partial class MainWindow : Window
     private static string FirstName(HudBlock b) =>
         b.Arguments.Count > 0 && b.Arguments[0].Kind == HudArgKind.String ? b.Arguments[0].Raw : "(unnamed)";
 
+    /// <summary>A name no block of any file of the HUD has yet.</summary>
     private string UniqueName(string baseName)
     {
-        if (_document is null) return baseName;
         var existing = new HashSet<string>(StringComparer.Ordinal);
-        CollectNames(_document.TopLevel, existing);
+        foreach (var file in _files) CollectNames(file.Document.TopLevel, existing);
         if (!existing.Contains(baseName)) return baseName;
         for (var i = 1; i < 10_000; i++)
         {
@@ -525,45 +903,34 @@ public partial class MainWindow : Window
 
     private void Canvas_BlockSelected(object? sender, HudBlock block)
     {
-        if (_document is null) return;
-        var path = _document.FindPathTo(block);
-        if (path is null) return;
+        if (Locate(block) is not { } at) return;
 
         _suppressSyncBack = true;
         try
         {
-            SelectPath(path);
+            SelectPath(at.File, at.Path);
             Canvas.HighlightBlock(block);
         }
         finally { _suppressSyncBack = false; }
     }
 
     /// <summary>
-    /// Select the tree row for <paramref name="path"/>, the blocks from the top of the file down to
-    /// the one wanted, expanding each on the way.
+    /// Select the tree row for the last block of <paramref name="path"/>, the blocks from the top of
+    /// <paramref name="file"/> down to it, expanding each on the way.
     /// </summary>
-    private void SelectPath(IReadOnlyList<HudBlock> path)
+    private void SelectPath(HudFile file, IReadOnlyList<HudBlock> path)
     {
-        if (path.Count == 0) return;
-        ItemsControl current = Tree;
-        for (var i = 0; i < path.Count; i++)
+        Tree.UpdateLayout();
+        if (Tree.ItemContainerGenerator.ContainerFromItem(file) is not TreeViewItem current) return;
+        foreach (var block in path)
         {
+            current.IsExpanded = true;
             current.UpdateLayout();
-            if (current.ItemContainerGenerator.ContainerFromItem(path[i]) is not TreeViewItem container)
-                return;
-
-            if (i < path.Count - 1)
-            {
-                container.IsExpanded = true;
-                container.UpdateLayout();
-                current = container;
-            }
-            else
-            {
-                container.IsSelected = true;
-                container.BringIntoView();
-            }
+            if (current.ItemContainerGenerator.ContainerFromItem(block) is not TreeViewItem next) return;
+            current = next;
         }
+        current.IsSelected = true;
+        current.BringIntoView();
     }
 
     internal static LocalizationTable? TryLoadLocalization(AssetResolver assets)
@@ -572,33 +939,6 @@ public partial class MainWindow : Window
         if (path is null) return null;
         try { return LocalizationTable.LoadFromCfg(path); }
         catch { return null; }
-    }
-
-    /// <summary>
-    /// The transform files a HUD loads with: the folder's own <c>hudtransforms.hud</c> (a mod's
-    /// replaces the stock one), else the stock one, then any other <c>hudtransforms*.hud</c> beside the
-    /// file, such as GameExt's. The file's own transforms are read from it after these. A file that does
-    /// not parse is skipped: transforms only feed the preview.
-    /// </summary>
-    internal static IReadOnlyList<HudDocument> TryLoadTransformDocuments(string mainHudPath)
-    {
-        var paths = new List<string>();
-        var hudDir = Path.GetDirectoryName(mainHudPath);
-        var own = hudDir is null ? null : Path.Combine(hudDir, "hudtransforms.hud");
-        if (own is not null && File.Exists(own)) paths.Add(own);
-        else if (File.Exists(Path.Combine(DefaultHudFolder, "hudtransforms.hud"))) paths.Add(Path.Combine(DefaultHudFolder, "hudtransforms.hud"));
-        if (hudDir is not null)
-            foreach (var extra in Directory.GetFiles(hudDir, "hudtransforms*.hud").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-                if (!paths.Contains(extra, StringComparer.OrdinalIgnoreCase)) paths.Add(extra);
-
-        var docs = new List<HudDocument>();
-        foreach (var path in paths)
-        {
-            if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(mainHudPath), StringComparison.OrdinalIgnoreCase)) continue;
-            try { docs.Add(HudParser.Parse(File.ReadAllText(path), path)); }
-            catch { /* skip a file that does not parse */ }
-        }
-        return docs;
     }
 
     private static int CountBlocks(IEnumerable<HudBlock> blocks)

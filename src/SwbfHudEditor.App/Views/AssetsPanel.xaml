@@ -1,0 +1,65 @@
+<UserControl x:Class="SwbfHudEditor.App.Views.AssetsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#252a30">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="6,6,6,4">
+            <TextBlock x:Name="SummaryText" Foreground="#d4e8ff" TextWrapping="Wrap" Text="Open a HUD to list its assets." />
+            <WrapPanel Margin="0,6,0,0">
+                <Button Content="Add asset folder..." Click="AddFolder_Click" Padding="8,1" Margin="0,0,4,4"
+                        ToolTip="Search a folder and all its subfolders for the textures, models, fonts and localization the HUD's own folders do not have." />
+                <Button Content="Rescan" Click="Rescan_Click" Padding="8,1" Margin="0,0,4,4"
+                        ToolTip="Read the asset folders again, after files were added to them." />
+                <CheckBox x:Name="MissingOnlyBox" Content="Missing only" IsChecked="True" Foreground="#bbb"
+                          VerticalAlignment="Center" Margin="6,0,0,4" Checked="Filter_Changed" Unchecked="Filter_Changed" />
+            </WrapPanel>
+            <TextBlock Text="Asset folders, searched with all their subfolders after the HUD's own folders and the stock ones:"
+                       Foreground="#888" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,2" />
+            <TextBlock x:Name="NoFoldersText" Text="(none)" Foreground="#888" FontStyle="Italic" FontSize="11" />
+            <ItemsControl x:Name="FolderList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <DockPanel Margin="0,1" ToolTip="{Binding Folder}">
+                            <Button DockPanel.Dock="Left" Content="×" Width="18" Padding="0" Margin="0,0,4,0"
+                                    VerticalAlignment="Center" Foreground="#dc7878" Background="#2c3440" BorderBrush="#404040"
+                                    ToolTip="Stop searching this folder" Tag="{Binding Folder}" Click="RemoveFolder_Click" />
+                            <StackPanel>
+                                <TextBlock Text="{Binding Folder}" Foreground="#d4e8ff" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Status}" Foreground="#888" FontSize="10" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </DockPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+        <ListView x:Name="AssetList" Background="#1e2227" Foreground="#d4e8ff" BorderThickness="0"
+                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="ToolTip" Value="{Binding Details}" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Kind" Width="62" DisplayMemberBinding="{Binding Kind}" />
+                    <GridViewColumn Header="Name" Width="170">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Found at" Width="220">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Where}" Foreground="{Binding WhereBrush}" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Used by" Width="260" DisplayMemberBinding="{Binding UsedBy}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </DockPanel>
+</UserControl>

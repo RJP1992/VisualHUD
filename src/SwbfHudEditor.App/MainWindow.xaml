@@ -9,10 +9,11 @@
         mc:Ignorable="d"
         Title="VisualHUD" Height="800" Width="1400"
         Loaded="Window_Loaded"
+        Closing="Window_Closing"
         PreviewKeyDown="Window_KeyDown">
     <Window.Resources>
         <!-- Dark theme applied to every TreeViewItem so the label text keeps its intended color
-             (orange for event groups, light blue for blocks) instead of the default system
+             (gold for files, light blue for blocks) instead of the default system
              selection foreground. Background stays dark gray; hover/selection keeps the same
              subtle highlight seen in other dark editors.
              Preview-click handler ensures clicking ANYWHERE in the row (including the checkbox)
@@ -28,6 +29,17 @@
             </Style.Triggers>
         </Style>
         <views:ElementsOnlyConverter x:Key="ElementsOnly" />
+        <!-- A file of the HUD, in load order: the game loads a HUD's files additively, each laid out
+             by its own FileInfo. Its blocks are nested under it as written. -->
+        <HierarchicalDataTemplate DataType="{x:Type local:HudFile}" ItemsSource="{Binding Document.TopLevel, Converter={StaticResource ElementsOnly}}">
+            <StackPanel Orientation="Horizontal" ToolTip="{Binding FilePath}">
+                <CheckBox IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,4,0" VerticalAlignment="Center"
+                          ToolTip="Show/hide this file's elements on the canvas"
+                          Click="VisibilityCheckBox_Click" />
+                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#ffd479" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Note}" Foreground="#8a8f96" FontStyle="Italic" Margin="8,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+        </HierarchicalDataTemplate>
         <!-- A block of the file, in file order, with the elements it holds nested under it (its
              property lines are in the Properties panel): the per-element visibility toggle and
              the block as written. -->
@@ -44,12 +56,23 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
-                <MenuItem Header="_Open..." Click="Open_Click" InputGestureText="Ctrl+O" />
-                <MenuItem Header="_Reload current file" Click="Reload_Click" InputGestureText="F5"
-                          ToolTip="Re-parse the current .hud from disk, discarding any unsaved edits. Useful after editing externally." />
+                <MenuItem Header="_Open..." Click="Open_Click" InputGestureText="Ctrl+O"
+                          ToolTip="Open the files of a HUD: one, or several that load together." />
+                <MenuItem Header="_Add HUD file..." Click="AddFiles_Click"
+                          ToolTip="Load more files with the open ones, after them, as the game loads a HUD's files additively. Each keeps its own FileInfo layout." />
+                <MenuItem Header="Re_move file from HUD" Click="RemoveFile_Click"
+                          ToolTip="Take the selection's file out of the HUD. The file on disk is not changed." />
                 <Separator />
-                <MenuItem Header="_Save" Click="Save_Click" InputGestureText="Ctrl+S" />
-                <MenuItem Header="Save _As..." Click="SaveAs_Click" InputGestureText="Ctrl+Shift+S" />
+                <MenuItem Header="Add asset _folder..." Click="AddAssetFolder_Click"
+                          ToolTip="Search a folder and all its subfolders for the textures, meshes, fonts and localization the HUD's own folders and the stock ones do not have. Remembered for next time." />
+                <Separator />
+                <MenuItem Header="_Reload files" Click="Reload_Click" InputGestureText="F5"
+                          ToolTip="Restart the editor and re-read the files from disk. Useful after editing externally." />
+                <Separator />
+                <MenuItem Header="_Save" Click="Save_Click" InputGestureText="Ctrl+S"
+                          ToolTip="Write every file with unsaved changes." />
+                <MenuItem Header="Save file _as..." Click="SaveAs_Click" InputGestureText="Ctrl+Shift+S"
+                          ToolTip="Write the selection's file under a new name." />
                 <Separator />
                 <MenuItem Header="E_xit" Click="Exit_Click" />
             </MenuItem>
@@ -69,7 +92,7 @@
         </Menu>
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
-                <TextBlock x:Name="StatusText" Text="Ready. Open a .hud file to begin." />
+                <TextBlock x:Name="StatusText" Text="Ready. Open a HUD's .hud files to begin." />
             </StatusBarItem>
             <Separator Margin="8,0" />
             <StatusBarItem>
@@ -84,7 +107,8 @@
                 <ColumnDefinition Width="4" />
                 <ColumnDefinition Width="360" />
             </Grid.ColumnDefinitions>
-            <TabControl Grid.Column="0" Background="#252a30" BorderThickness="0" Padding="0">
+            <TabControl x:Name="LeftTabs" Grid.Column="0" Background="#252a30" BorderThickness="0" Padding="0"
+                        SelectionChanged="LeftTabs_SelectionChanged">
                 <TabItem Header="Elements">
                 <TreeView x:Name="Tree" SelectedItemChanged="Tree_SelectedItemChanged"
                           PreviewMouseLeftButtonDown="Tree_PreviewMouseLeftButtonDown"
@@ -106,6 +130,9 @@
                 </TabItem>
                 <TabItem Header="Events">
                     <views:EventsPanel x:Name="EventsList" />
+                </TabItem>
+                <TabItem x:Name="AssetsTab" Header="Assets">
+                    <views:AssetsPanel x:Name="AssetsList" />
                 </TabItem>
             </TabControl>
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"

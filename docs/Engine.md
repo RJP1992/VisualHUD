@@ -119,6 +119,23 @@ Then:
 - **Runtime HUD scale.** `HUD::Element::SetRuntimeScale` (P `005F5400`) rescales the axes
   of `Scalable(1)` elements and keeps their translation.
 
+## Several files
+
+A HUD is several `.hud` files: the stock `ingame.lvl` loads `hudtransforms` and the HUD files,
+and a mod can load more lvls with their own (BF3's `Platform.lua` picks a HUD lvl and a minimap
+lvl). Every file loads into the same screen groups:
+
+- **Each file is read on its own**, with its own `FileInfo`. Under GameExt a file with
+  `AuthoredRatio` or `TrueWidescreen` is laid out on its ratio, while a file without one keeps
+  the stock layout beside it.
+- **Events and transforms are global**: a transform in one file feeds elements in another,
+  and an event reaches every file's elements.
+- **Top-level order.** A top-level element's drawable joins its screen group when the element is
+  enabled (`HUD::Element::UpdateEnableState`, P `005F5C00`), after every drawable of an equal or
+  higher z-order, its `ZOrder` line having set its z-order before. Among top-level elements of
+  equal z-order, the one enabled later draws on top, whatever its file. Until events are
+  simulated the editor uses load order, file by file.
+
 ## GameExt
 
 The **GameExt** target adds what BF2GameExt does; the C# is a line-for-line port of its
@@ -167,6 +184,29 @@ error for each).
 - **GameExt's world-tracking positions** (reticule, lock-on, target, command posts) in a file it
   lays out land on the real screen point: x is handed over as `(v·W − slide) / WL`.
 - **Names** hash with `PblHash` (FNV-1a, each byte OR 0x20), so they match whatever their case.
+
+## Defaults
+
+Saving leaves out a property line that sets what the element's constructors already set
+(`SwbfHudEditor.Core/Layout/ElementDefaults.cs`), when the line is in its plain form and its
+key appears once in the block:
+
+| Element | Lines left out | Read from |
+|---|---|---|
+| Every element | `Position(0, 0, 0[, mode])`, `Rotation(0, 0, 0)`, `Scale(1, 1, 1)`, `Alpha(1)`, `Color(255, 255, 255)`, `ColorChange(255, 255, 255)`, `ColorChangeRate(0.3)`, `ColorPulseRate` and `FadeHoldTime` at `FLT_MAX`, `FadeInTime(0)`, `FadeSustainTime(0)`, `FadeOutTime(0)`, `Viewport(0)`, `UseChangeColor(0)`, `EditOnly(0)`, `Scalable(0)` | `HUD::Element` constructor P `005F1E70` (flag bits 0, 3 and 5 cleared), `Envelope` P `0060EDC0` |
+| Group | `Rect(1, 1[, "Left"[, "Top"[, "Viewport"]]])`, `PropagateAlpha(0)` | P `005FB4D0` |
+| Bitmaps | `TexCoords(0, 0, 1, 1)`, `BitmapStyle("Normal")`, `BlendMode("Alpha")` | `RedBitmapElement` constructor P `008C8A10` |
+| Bars | `Value(1)`, `MinValue(0)`, `MaxValue(1)`; BarBitmap `ScaleTexture(1)`, `ScaleSize(1)`, `FlashyScale(0.2)`, `FlashyIncFadeOutTime(0)`, `FlashyDecFadeOutTime(0)`, GameExt's `FillFrom("Left")`; BarSegmented `NumSegments(0)`, `Circular(1)`, `AngleStart(0)`, `AngleEnd(0)` | `ElementBar` and its subclasses' constructors |
+| Text | `TextScale(1, 1)`, `TextAlignment("Left", "Top")`, `TextBox(0, 0)`, `TextCharacterSpacing(1)`, `TextTabSpacing(0)`, `IntegerFormat("%d")`, `FloatFormat("%f")` | `RedTextElement` constructor P `008C4E90` |
+| Model3D | `Depth(0.01)`, `Lighting(1)`; in a `MeshInfo`, `Position(0, 0, 0)`, `Rotation(0, 0, 0)`, `Scale(1, 1, 1)` | P `008DECE0`, `MeshInfo::Read` P `00605FC0` |
+
+Kept whatever their value: `ZOrder` (a child's line moves it in front of its equals even at
+128), every line of a key written more than once in a block, the lines that make the element,
+events, a `MeshInfo`'s `Depth` (it replaces the element's), a word where a number goes (the game
+reads its hash), keys whose default is not known (`TextStyle`, `TextBreak`, `Percent`, ...), and
+everything outside the elements the game builds as written: `FileInfo`, transforms, `ViewPort`
+settings, sounds, `Segment` templates, and Map, Target, VehicleSeating, ObjectiveList,
+BorderedBox and MultilineText with all they hold.
 
 ## Not modelled yet
 

@@ -18,12 +18,58 @@ dotnet build SwbfHudEditor.sln
 ```
 
 Then run `VisualHUD.bat`, or `src/SwbfHudEditor.App/bin/Debug/net8.0-windows/VisualHUD.exe`
-with a `.hud` file as its argument. Textures, models, the transforms file and the English
-localization are looked up next to the file and in `C:\BF2_ModTools\data\Common`.
+with one or more `.hud` files as arguments. Textures, models, fonts, the transforms files and
+the English localization are looked up next to the files and in `C:\BF2_ModTools\data\Common`,
+then in any asset folders you add (see [Assets](#assets)).
 
 ```bash
 dotnet test SwbfHudEditor.sln
 ```
+
+## A HUD's files
+
+A HUD is usually several `.hud` files: the game loads the stock transforms and HUD files, and
+a mod can load more. They load additively, into the same screen groups, and each is laid out
+by its own `FileInfo`. The editor works on such a set:
+
+- **File > Open** takes one file or several, loaded in name order; **Add HUD file** loads
+  more after them; **Remove file from HUD** takes the selection's file out (the file on disk
+  is not changed). Several files on the command line load in that order.
+- The tree has a node per file, in load order. The transform files the HUD needs load first,
+  marked *loaded with the set*: the folder's `hudtransforms.hud` (else the stock one) and its
+  other `hudtransforms*.hud`, such as GameExt's.
+- Under GameExt, a file with `AuthoredRatio` or `TrueWidescreen` is laid out on its ratio
+  while the files without one keep the stock layout, side by side. The tree notes the files
+  GameExt lays out; the guides and the layout line are for the selection's file.
+- Events and transforms reach every file. Each file's checkbox shows or hides its elements.
+- **Save** writes every file with unsaved changes, and only those; **Save file as** writes
+  the selection's file under a new name. A saved file loses its comments.
+- Saving leaves out the lines that only restate the engine's defaults, such as `Alpha(1)`
+  or `Rotation(0, 0, 0)`; the Properties panel shows them in grey italics. Lines the game
+  needs whatever their value stay: `ZOrder`, a key written twice in a block, and anything
+  whose default is not known. The list is in [docs/Engine.md](docs/Engine.md#defaults).
+
+## Assets
+
+Textures, meshes, fonts and the English localization are looked up in the HUD's own folders
+(the `hud` folder and its `Common` folder's `interface`, `effects`, `mshs`, `fonts` and
+`Localize`), then in `C:\BF2_ModTools\data\Common`.
+
+- **File > Add asset folder** adds folders that are searched, with all their subfolders, for
+  whatever those do not have: a mod's whole data folder, say, whose HUD models sit under
+  `Sides`. A name found in several places resolves to the first path in alphabetical order.
+- Asset folders are remembered in `%LOCALAPPDATA%\VisualHUD\settings.json` and read in the
+  background each time the editor starts. A large folder (all of `C:\BF2_ModTools` is about
+  450,000 files) takes some seconds.
+- The **Assets** tab lists what the open files name, where each was found, or that it is
+  missing, and what uses it:
+  - textures: `Bitmap` and `Mask` lines, and the textures of the models found;
+  - meshes: `Mesh`, `MeshInfo`, and the transforms' `NameMesh` rows;
+  - fonts: `TextFont`, a `.fff` file;
+  - the localization file.
+- **Rescan** reads the folders again after files were added to them; the × removes a folder.
+- Textures are `.tga` files and models `.msh` files, as the game's munge reads them; a `.png`
+  does not count. Fonts are checked only: text is still drawn with a system font.
 
 ## The canvas
 
@@ -46,7 +92,7 @@ the inverse of the matrix the game draws it with.
 
 ## Events
 
-The Events tab lists every event the file and its transforms use: what it is (sent by the
+The Events tab lists every event the files and their transforms use: what it is (sent by the
 game, by GameExt, or by a transform), its type, and who reads it. With **Simulate the game's
 events** on, the canvas shows the HUD as the game would after the events you have sent:
 
@@ -54,7 +100,7 @@ events** on, the canvas shows the HUD as the game would after the events you hav
   and only while every group above it shows. Nothing shows before any event, as in the game.
 - Bars fill, texts print their numbers and strings, colours, textures and models change, and
   groups move, scale and turn, from the values sent. Transforms run as the game runs them, from
-  the folder's `hudtransforms*.hud` files and the file itself.
+  every file of the HUD in load order.
 - Type a value and press Enter, or **Send** to send it again so it counts as the latest.
   **Initialize** sends `initialize`; **On foot** sends a typical spawned soldier's state;
   **Show selected** sends whatever shows the selected element; **Clear** starts again.
@@ -70,7 +116,9 @@ The canvas can be rendered to a PNG without opening a window:
 VisualHUD.exe --snapshot file.hud out.png --screen 1920x1080 --game vanilla
 ```
 
-Options: `--screen WxH`, `--game gameext|vanilla`, `--snap on|off`, `--viewport n`,
+Options: `--add other.hud` (repeatable: more files of the HUD, loaded after the first, as in
+the editor), `--assets folder` (repeatable: asset folders besides the editor's saved ones),
+`--screen WxH`, `--game gameext|vanilla`, `--snap on|off`, `--viewport n`,
 `--background image.png` (draw over a screenshot of the same size), `--no-placeholders`,
 `--no-guides`, `--preset onfoot` and `--send event[=value]` (repeatable, in order) to simulate
 events, and `--dump layout.txt` to list every element as laid out. Errors are written to

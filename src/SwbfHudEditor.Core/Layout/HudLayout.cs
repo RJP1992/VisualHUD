@@ -28,46 +28,65 @@ public static class HudLayout
         }
     }
 
-    public static HudLayoutResult Lay(HudDocument doc, LayoutOptions options)
+    public static HudLayoutResult Lay(HudDocument doc, LayoutOptions options) => Lay(new[] { doc }, options);
+
+    /// <summary>
+    /// Lay out the files a HUD loads, in load order. The game loads them additively into the same
+    /// screen groups, and each file keeps its own <c>FileInfo</c>: under GameExt an
+    /// <c>AuthoredRatio</c> file is laid out on its ratio while the others keep the stock layout.
+    /// </summary>
+    public static HudLayoutResult Lay(IReadOnlyList<HudDocument> docs, LayoutOptions options)
     {
-        var file = HudFileLayout.For(doc, options);
-        var ctx = new Context(options, file);
-
+        var byBlock = new Dictionary<HudBlock, LaidOutElement>(ReferenceEqualityComparer.Instance);
+        var files = new List<(HudDocument Document, HudFileLayout Layout)>();
         var roots = new List<LaidOutElement>();
-        foreach (var top in TopLevelElements(doc))
-            if (ElementKinds.TryGet(top, out var kind))
-                roots.Add(Build(ctx, top, kind, null, 0));
+        var round = options.RoundsToUnits;
+        var groupWorld = EngineMath.LetterboxMatrix(options.Screen) * EngineMath.ScreenGroupParent(options.Screen);
+        if (round) groupWorld = EngineMath.RoundTranslation(groupWorld);
 
-        if (file.Opted) Place(ctx, roots);
-        foreach (var root in roots) ApplyTrackedMoves(ctx, root);
-
-        var groupWorld = ctx.Round(EngineMath.LetterboxMatrix(options.Screen) * EngineMath.ScreenGroupParent(options.Screen));
-        foreach (var root in roots)
+        foreach (var doc in docs)
         {
-            var parent = !file.Opted ? groupWorld
-                : EngineMath.PixelParent(options.Screen, root.Role == PieceRole.Piece ? root.Slide : 0f);
-            Draw(ctx, root, parent);
+            var file = HudFileLayout.For(doc, options);
+            files.Add((doc, file));
+            var ctx = new Context(options, file, doc, byBlock);
+
+            var docRoots = new List<LaidOutElement>();
+            foreach (var top in TopLevelElements(doc))
+                if (ElementKinds.TryGet(top, out var kind))
+                    docRoots.Add(Build(ctx, top, kind, null, 0));
+
+            if (file.Opted) Place(ctx, docRoots);
+            foreach (var root in docRoots) ApplyTrackedMoves(ctx, root);
+            foreach (var root in docRoots)
+            {
+                var parent = !file.Opted ? groupWorld
+                    : EngineMath.PixelParent(options.Screen, root.Role == PieceRole.Piece ? root.Slide : 0f);
+                Draw(ctx, root, parent);
+            }
+            roots.AddRange(docRoots);
         }
 
         var next = 0;
-        foreach (var e in DrawOrder(roots)) e.DrawIndex = next++;
+        foreach (var e in DrawOrder(TopLevelInsertionOrder(roots, options.Simulation), topLevel: true)) e.DrawIndex = next++;
 
         return new HudLayoutResult
         {
             Options = options,
-            File = file,
+            Files = files,
             Roots = roots,
-            ByBlock = ctx.ByBlock,
+            ByBlock = byBlock,
             GroupWorld = groupWorld,
         };
     }
 
-    private sealed class Context(LayoutOptions options, HudFileLayout file)
+    private sealed class Context(LayoutOptions options, HudFileLayout file, HudDocument document,
+        Dictionary<HudBlock, LaidOutElement> byBlock)
     {
         public LayoutOptions Options { get; } = options;
         public HudFileLayout File { get; } = file;
+        public HudDocument Document { get; } = document;
         public HudScreen Screen => Options.Screen;
-        public Dictionary<HudBlock, LaidOutElement> ByBlock { get; } = new(ReferenceEqualityComparer.Instance);
+        public Dictionary<HudBlock, LaidOutElement> ByBlock { get; } = byBlock;
 
         /// <summary><c>GetContainerViewWidth</c>: the screen with one viewport; GameExt's layout width for an opted-in file.</summary>
         public float ViewWidth => File.LayoutWidth;
@@ -95,6 +114,8 @@ public static class HudLayout
             Spec = spec,
             Parent = parent,
             Depth = depth,
+            Document = ctx.Document,
+            FileLayout = ctx.File,
             // HUD::Element::GetViewport asks the element's group, up to the top: a nested element's
             // own Viewport line changes nothing.
             Viewport = parent?.Viewport ?? spec.Viewport ?? 0,
@@ -465,12 +486,20 @@ public static class HudLayout
     /// equal or lower one. The list runs from high z-order to low and is drawn from its head, so a lower
     /// <c>ZOrder</c> draws on top.
     /// </summary>
-    internal static IEnumerable<LaidOutElement> DrawOrder(IReadOnlyList<LaidOutElement> siblings)
+    internal static IEnumerable<LaidOutElement> DrawOrder(IReadOnlyList<LaidOutElement> siblings, bool topLevel = false)
     {
         const int startingZOrder = 128;
         var list = new List<LaidOutElement>();
         foreach (var e in siblings)
         {
+            if (topLevel)
+            {
+                // A top-level element's drawable joins its screen group only when the element is
+                // enabled (HUD::Element::UpdateEnableState, P 005F5C00), after its ZOrder line set the
+                // z-order outside any list: it goes after every element of an equal or higher one.
+                InsertAfterEqual(list, e, e.Spec.ZOrder);
+                continue;
+            }
             InsertAfterEqual(list, e, startingZOrder);
             if (HasZOrderLine(e)) InsertBeforeEqual(list, e, e.Spec.ZOrder);
         }
@@ -479,6 +508,23 @@ public static class HudLayout
             yield return e;
             foreach (var d in DrawOrder(e.Children)) yield return d;
         }
+    }
+
+    /// <summary>
+    /// The order top-level elements joined their screen groups: the order their enabling events were
+    /// sent when simulating (one enabled later goes behind those of an equal z-order already there),
+    /// else load order, file by file.
+    /// </summary>
+    private static IReadOnlyList<LaidOutElement> TopLevelInsertionOrder(IReadOnlyList<LaidOutElement> roots,
+        Events.HudSimulation? simulation)
+    {
+        if (simulation is null) return roots;
+        return roots
+            .Select((e, i) => (e, i))
+            .OrderBy(x => x.e.Runtime is { Enabled: true } r ? r.EnableSeq : long.MaxValue)
+            .ThenBy(x => x.i)
+            .Select(x => x.e)
+            .ToList();
     }
 
     private static void InsertAfterEqual(List<LaidOutElement> list, LaidOutElement e, int z)

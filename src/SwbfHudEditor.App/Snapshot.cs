@@ -13,10 +13,14 @@ namespace SwbfHudEditor.App;
 /// <summary>
 /// Renders a <c>.hud</c> file as the editor's canvas draws it to a PNG, without a window:
 /// <code>
-/// VisualHUD.exe --snapshot file.hud out.png [--screen 1280x720] [--game gameext|vanilla]
+/// VisualHUD.exe --snapshot file.hud out.png [--add other.hud]... [--screen 1280x720] [--game gameext|vanilla]
 ///               [--snap on|off] [--viewport 1] [--background shot.png] [--no-placeholders] [--no-guides]
 ///               [--preset onfoot] [--send event[=value]]... [--dump layout.txt]
 /// </code>
+/// <c>--add</c>, repeated, loads more files after the first, as the game loads a HUD's files: each laid
+/// out by its own <c>FileInfo</c>. The transform files beside them load first, as in the editor.
+/// Assets are found as in the editor, its saved asset folders included; <c>--assets folder</c>,
+/// repeated, searches more.
 /// <c>--background</c> draws the HUD over an image of the same size, such as an in-game screenshot.
 /// <c>--preset onfoot</c> sends the Events tab's on-foot scenario, then <c>--send</c>, repeated, sends
 /// more events in that order (a value typed as in the Events tab).
@@ -59,6 +63,8 @@ internal static class Snapshot
         var sends = new List<(string Name, string? Value)>();
         string? dump = null;
         string? preset = null;
+        var paths = new List<string> { hudPath };
+        var assetFolders = new List<string>(AppSettings.Load().AssetFolders);
         for (var i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
@@ -94,6 +100,12 @@ internal static class Snapshot
                 case "--dump":
                     dump = Path.GetFullPath(Next());
                     break;
+                case "--add":
+                    paths.Add(Path.GetFullPath(Next()));
+                    break;
+                case "--assets":
+                    assetFolders.Add(Path.GetFullPath(Next()));
+                    break;
                 case "--preset":
                     preset = Next().ToLowerInvariant();
                     if (preset != "onfoot") throw new ArgumentException("--preset takes onfoot");
@@ -101,15 +113,18 @@ internal static class Snapshot
             }
         }
 
-        var doc = HudParser.Parse(File.ReadAllText(hudPath), hudPath);
-        var assets = AssetResolver.ForHudFile(hudPath, Directory.Exists(MainWindow.StockDataCommon) ? MainWindow.StockDataCommon : null);
+        var docs = HudFileSet.Load(paths);
+        var assets = MainWindow.ResolverFor(paths,
+            assetFolders.Distinct(HudFileSet.PathComparer).Select(folder => AssetFolderIndex.Scan(folder)).ToList());
         var canvas = new HudCanvas();
         canvas.Configure(target, screen, snap, viewport, placeholders, guides);
-        canvas.LoadDocument(doc, assets, MainWindow.TryLoadLocalization(assets), MainWindow.TryLoadTransformDocuments(hudPath));
+        canvas.LoadDocuments(docs, assets, MainWindow.TryLoadLocalization(assets));
+        // The guides are the first file's: the files come after their transforms.
+        canvas.ActiveDocument = docs[docs.Count - paths.Count];
         if (sends.Count > 0 || preset is not null)
         {
             // Type each event by what it is, else by how the files use it.
-            var uses = HudEventUsage.Of(doc, canvas.Transforms!).ToDictionary(u => u.Name, StringComparer.OrdinalIgnoreCase);
+            var uses = HudEventUsage.Of(docs, canvas.Transforms!).ToDictionary(u => u.Name, StringComparer.OrdinalIgnoreCase);
             var state = new HudEventState();
             if (preset == "onfoot") state.SendAll(HudEventPresets.OnFoot(canvas.Transforms!));
             foreach (var (name, text) in sends)

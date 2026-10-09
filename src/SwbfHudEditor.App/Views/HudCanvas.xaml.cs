@@ -33,11 +33,12 @@ public partial class HudCanvas : UserControl
         (2560, 1080, "21:9"), (3440, 1440, "21:9"), (5120, 1440, "32:9"),
     };
 
-    private HudDocument? _document;
+    // The files of the HUD in load order, and the one the guides and the layout line describe.
+    private IReadOnlyList<HudDocument> _documents = Array.Empty<HudDocument>();
+    private HudDocument? _activeDocument;
     private TextureCache? _textures;
     private MeshRenderer? _meshRenderer;
     private LocalizationTable? _localization;
-    private IReadOnlyList<HudDocument> _transformDocs = Array.Empty<HudDocument>();
     private HudTransformGraph? _graph;
     private HudEventState? _events;
 
@@ -89,24 +90,42 @@ public partial class HudCanvas : UserControl
     }
 
     /// <summary>
-    /// Show a document. <paramref name="transformDocs"/> are the transform files loaded with it; its own
-    /// transforms are read from it, after them.
+    /// Show the files of a HUD, in load order. The game loads them additively: their elements share the
+    /// screen groups and their transforms and events are global, while each file is laid out by its own
+    /// <c>FileInfo</c>.
     /// </summary>
-    public void LoadDocument(HudDocument? doc, AssetResolver? assets, LocalizationTable? localization = null,
-        IReadOnlyList<HudDocument>? transformDocs = null)
+    public void LoadDocuments(IReadOnlyList<HudDocument> docs, AssetResolver? assets, LocalizationTable? localization = null)
     {
-        _document = doc;
+        _documents = docs;
+        if (_activeDocument is not null && !docs.Contains(_activeDocument)) _activeDocument = null;
         _textures = assets is not null ? new TextureCache(assets) : null;
         _meshRenderer = _textures is not null && assets is not null ? new MeshRenderer(assets, _textures) : null;
         if (_meshRenderer is not null) _meshRenderer.MeshUnitToHudPixels = MeshFactorSlider.Value;
         _localization = localization;
-        _transformDocs = transformDocs ?? Array.Empty<HudDocument>();
         _tinted.Clear();
         Render();
     }
 
-    /// <summary>The transforms of the transform files and the document, as last drawn.</summary>
+    /// <summary>The file the guides and the layout line describe, such as the selection's.</summary>
+    public HudDocument? ActiveDocument
+    {
+        get => _activeDocument;
+        set
+        {
+            if (ReferenceEquals(_activeDocument, value)) return;
+            _activeDocument = value;
+            Render();
+        }
+    }
+
+    /// <summary>Editor-only: whether a file's elements are drawn. Null draws every file.</summary>
+    public Func<HudDocument, bool>? DocumentVisible { get; set; }
+
+    /// <summary>The transforms of every file, in load order, as last drawn.</summary>
     public HudTransformGraph? Transforms => _graph;
+
+    /// <summary>How a file is laid out with the toolbar's options, for a status line.</summary>
+    public string? DescribeFile(HudDocument doc) => _layout?.LayoutOf(doc) is { } file ? Describe(_layout.Options, file) : null;
 
     /// <summary>
     /// Draw as the game does once these events have been sent, or, with null, every element enabled in
@@ -155,9 +174,15 @@ public partial class HudCanvas : UserControl
     {
         if (_layout is null) return "(no document)";
         var text = new System.Text.StringBuilder();
-        text.AppendLine($"{_screen} {_target}: {LayoutInfoText.Text}");
+        text.AppendLine($"{_screen} {_target}");
+        HudDocument? file = null;
         foreach (var e in _layout.All)
         {
+            if (!ReferenceEquals(e.Document, file))
+            {
+                file = e.Document;
+                text.AppendLine($"-- {FileName(file)}: {Describe(_layout.Options, e.FileLayout)}");
+            }
             var at = ToScreen(e.ToScreen, 0, 0);
             var state = !e.InActiveViewport ? "other viewport" : e.Shown ? "shown" : e.Enabled ? "parent hidden" : "hidden";
             var what = new List<string>();
@@ -215,19 +240,20 @@ public partial class HudCanvas : UserControl
         _visuals.Clear();
         _highlight.Clear();
         _layout = null;
-        if (_document is null)
+        if (_documents.Count == 0)
         {
             LayoutInfoText.Text = string.Empty;
+            LayoutInfoText.ToolTip = null;
             return;
         }
 
-        _graph = HudTransformGraph.From(_transformDocs.Append(_document));
+        _graph = HudTransformGraph.From(_documents);
         HudSimulation? simulation = null;
         if (_events is not null)
-            simulation = HudSimulation.Run(_document, _graph, _events, _localization is { } table ? table.TryGetByHash : null);
+            simulation = HudSimulation.Run(_documents, _graph, _events, _localization is { } table ? table.TryGetByHash : null);
         SimulationUpdated?.Invoke(this, simulation);
 
-        _layout = HudLayout.Lay(_document, new LayoutOptions
+        _layout = HudLayout.Lay(_documents, new LayoutOptions
         {
             Screen = _screen,
             Target = _target,
@@ -237,8 +263,16 @@ public partial class HudCanvas : UserControl
             ModelMesh = ChooseMesh,
             Simulation = simulation,
         });
-        LayoutInfoText.Text = Describe(_layout);
-        if (GuidesBox.IsChecked == true) DrawGuides(_layout);
+        // The layout line and the guides are for one file: the active one, else the first with elements.
+        var withElements = _layout.Files.Where(f => HudLayout.TopLevelElements(f.Document).Any()).ToList();
+        var described = withElements.FirstOrDefault(f => ReferenceEquals(f.Document, _activeDocument));
+        if (described.Document is null) described = withElements.Count > 0 ? withElements[0] : _layout.Files[0];
+        var line = Describe(_layout.Options, described.Layout);
+        LayoutInfoText.Text = withElements.Count > 1 ? $"{FileName(described.Document)}: {line}" : line;
+        LayoutInfoText.ToolTip = withElements.Count > 1
+            ? string.Join("\n", withElements.Select(f => $"{FileName(f.Document)}: {Describe(_layout.Options, f.Layout)}"))
+            : null;
+        if (GuidesBox.IsChecked == true) DrawGuides(_layout.Options.Screen, described.Layout);
 
         var showHidden = ShowHiddenBox.IsChecked == true;
         foreach (var e in _layout.All.OrderBy(e => e.DrawIndex))
@@ -264,6 +298,7 @@ public partial class HudCanvas : UserControl
 
     private bool IsShown(LaidOutElement e)
     {
+        if (DocumentVisible is { } visible && !visible(e.Document)) return false;
         for (var x = e; x is not null; x = x.Parent)
             if (!x.Block.IsVisible) return false;
         return e.InActiveViewport;
@@ -280,10 +315,10 @@ public partial class HudCanvas : UserControl
                 ?.Rows.Select(r => r.Mesh).FirstOrDefault()
             : null);
 
-    private static string Describe(HudLayoutResult layout)
+    private static string FileName(HudDocument doc) => System.IO.Path.GetFileName(doc.SourcePath) ?? "(unsaved)";
+
+    private static string Describe(LayoutOptions o, HudFileLayout f)
     {
-        var o = layout.Options;
-        var f = layout.File;
         if (f.Opted)
         {
             var ratio = f.Ratio is { } r ? RatioName(r) : "?";
@@ -300,7 +335,7 @@ public partial class HudCanvas : UserControl
             : $"{why}: heights in a band {band:0.###} tall, bitmaps {EngineMath.BitmapStretch(o.Screen):0.###}× taller";
     }
 
-    private static string RatioName(float r)
+    internal static string RatioName(float r)
     {
         foreach (var (w, h) in new[] { (4, 3), (5, 4), (16, 9), (16, 10), (21, 9), (32, 9), (1, 1) })
             if (MathF.Abs(r - (float)w / h) < 1e-3f) return $"{w}:{h}";
@@ -610,15 +645,15 @@ public partial class HudCanvas : UserControl
 
     // ---- Guides ---------------------------------------------------------------------------------------
 
-    private void DrawGuides(HudLayoutResult layout)
+    /// <summary>One file's guides: GameExt's thirds for a file laid out on its ratio, else the stock band.</summary>
+    private void DrawGuides(HudScreen s, HudFileLayout file)
     {
-        var s = layout.Options.Screen;
         var guide = new SolidColorBrush(Color.FromArgb(150, 90, 160, 220));
         var dead = new SolidColorBrush(Color.FromArgb(28, 220, 120, 80));
-        if (layout.File.Opted)
+        if (file.Opted)
         {
             // Where each third of the layout lands, and the bands no piece without an anchor can hold.
-            var lw = layout.File.LayoutWidth;
+            var lw = file.LayoutWidth;
             var spare = s.WidthF - lw;
             var edges = new[]
             {

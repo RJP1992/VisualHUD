@@ -56,6 +56,9 @@ public sealed class ElementRuntime
     /// <summary>The later of its <c>EventEnable</c> and <c>EventDisable</c> events was the enable. An element starts disabled.</summary>
     public bool Enabled { get; init; }
 
+    /// <summary>When its enable event was sent, in the order of all sends (0 if never).</summary>
+    public long EnableSeq { get; init; }
+
     /// <summary>The bar's raw value from <c>EventValue</c>.</summary>
     public float? BarValue { get; init; }
 
@@ -88,6 +91,10 @@ public sealed class HudSimulation
     public ElementRuntime? For(HudBlock block) => Elements.TryGetValue(block, out var r) ? r : null;
 
     public static HudSimulation Run(HudDocument document, HudTransformGraph transforms, HudEventState state,
+        Func<uint, string?>? localizeByHash = null) => Run(new[] { document }, transforms, state, localizeByHash);
+
+    /// <summary>The events' effect on every element of the files a HUD loads: events are global to them all.</summary>
+    public static HudSimulation Run(IReadOnlyList<HudDocument> documents, HudTransformGraph transforms, HudEventState state,
         Func<uint, string?>? localizeByHash = null)
     {
         var effective = new Dictionary<string, EventSend>(state.Sends, StringComparer.OrdinalIgnoreCase);
@@ -107,8 +114,9 @@ public sealed class HudSimulation
         }
 
         var elements = new Dictionary<HudBlock, ElementRuntime>(ReferenceEqualityComparer.Instance);
-        foreach (var block in HudLayout.TopLevelElements(document))
-            Visit(block, effective, localizeByHash, elements);
+        foreach (var document in documents)
+            foreach (var block in HudLayout.TopLevelElements(document))
+                Visit(block, effective, localizeByHash, elements);
         return new HudSimulation { Effective = effective, Elements = elements };
     }
 
@@ -167,6 +175,7 @@ public sealed class HudSimulation
         into[block] = new ElementRuntime
         {
             Enabled = enable > disable,
+            EnableSeq = enable,
             BarValue = bar,
             Text = text,
             Color = color,
@@ -252,7 +261,11 @@ public static class HudEventUsage
     /// Every event the document and the transforms name, typed by the catalogue, else by the transform
     /// that publishes it, else by the property that reads it.
     /// </summary>
-    public static IReadOnlyList<HudEventUse> Of(HudDocument document, HudTransformGraph transforms)
+    public static IReadOnlyList<HudEventUse> Of(HudDocument document, HudTransformGraph transforms) =>
+        Of(new[] { document }, transforms);
+
+    /// <summary>Every event the files of a HUD and their transforms name.</summary>
+    public static IReadOnlyList<HudEventUse> Of(IReadOnlyList<HudDocument> documents, HudTransformGraph transforms)
     {
         var readers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var guessed = new Dictionary<string, HudEventType>(StringComparer.OrdinalIgnoreCase);
@@ -268,7 +281,8 @@ public static class HudEventUsage
             if (guess != HudEventType.Invalid) guessed.TryAdd(name, guess);
         }
 
-        foreach (var block in HudLayout.TopLevelElements(document)) Walk(block, Read);
+        foreach (var document in documents)
+            foreach (var block in HudLayout.TopLevelElements(document)) Walk(block, Read);
         foreach (var node in transforms.Nodes)
             foreach (var input in node.Inputs)
                 Read(input, $"{node.Kind} \"{node.InstanceName}\"", node switch

@@ -4,18 +4,19 @@ namespace SwbfHudEditor.Core.Hud;
 
 public static class HudWriter
 {
-    public static string Write(HudDocument doc, string indent = "    ")
+    /// <summary>The document as text; lines <paramref name="omit"/> picks are left out, the document is not changed.</summary>
+    public static string Write(HudDocument doc, string indent = "    ", Func<HudBlock, bool>? omit = null)
     {
         var sb = new StringBuilder();
         for (var i = 0; i < doc.TopLevel.Count; i++)
         {
-            WriteBlock(sb, doc.TopLevel[i], depth: 0, indent);
+            WriteBlock(sb, doc.TopLevel[i], depth: 0, indent, omit);
             if (i < doc.TopLevel.Count - 1) sb.Append('\n');
         }
         return sb.ToString();
     }
 
-    private static void WriteBlock(StringBuilder sb, HudBlock block, int depth, string indent)
+    private static void WriteBlock(StringBuilder sb, HudBlock block, int depth, string indent, Func<HudBlock, bool>? omit)
     {
         AppendIndent(sb, depth, indent);
         sb.Append(block.Name).Append('(');
@@ -33,7 +34,8 @@ public static class HudWriter
             sb.Append("{\n");
             foreach (var child in block.Children)
             {
-                WriteBlock(sb, child, depth + 1, indent);
+                if (omit?.Invoke(child) == true) continue;
+                WriteBlock(sb, child, depth + 1, indent, omit);
                 sb.Append('\n');
             }
             AppendIndent(sb, depth, indent);

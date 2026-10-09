@@ -20,7 +20,13 @@ public sealed record PropertyDeleteRequestedEventArgs(HudBlock Target, HudBlock 
 public partial class PropertyPanel : UserControl
 {
     private static readonly FontFamily MonoFont = new("Consolas, Cascadia Mono, Menlo, monospace");
+    private static readonly Brush NameBrush = new SolidColorBrush(Color.FromRgb(180, 200, 240));
+    private static readonly Brush DefaultLineBrush = new SolidColorBrush(Color.FromRgb(120, 128, 140));
     private HudBlock? _block;
+    private readonly List<(HudBlock Leaf, TextBlock Label)> _nameLabels = new();
+
+    /// <summary>Whether a line only restates the engine's default, so saving leaves it out. Set by the host.</summary>
+    public Func<HudBlock, bool>? IsDefaultLine { get; set; }
 
     public event EventHandler<PropertyEditedEventArgs>? PropertyEdited;
     public event EventHandler<PropertyInsertRequestedEventArgs>? PropertyInsertRequested;
@@ -37,10 +43,25 @@ public partial class PropertyPanel : UserControl
         Rebuild();
     }
 
+    /// <summary>Mark again the rows whose line restates a default, after an edit.</summary>
+    public void RefreshDefaultMarks()
+    {
+        foreach (var (leaf, label) in _nameLabels) MarkDefault(leaf, label);
+    }
+
+    private void MarkDefault(HudBlock leaf, TextBlock label)
+    {
+        var isDefault = IsDefaultLine?.Invoke(leaf) == true;
+        label.Foreground = isDefault ? DefaultLineBrush : NameBrush;
+        label.FontStyle = isDefault ? FontStyles.Italic : FontStyles.Normal;
+        label.ToolTip = isDefault ? $"{leaf.Name} here is the engine's default: saving leaves this line out." : leaf.Name;
+    }
+
     private void Rebuild()
     {
         Rows.Children.Clear();
         AddRows.Children.Clear();
+        _nameLabels.Clear();
         if (_block is null)
         {
             HeaderText.Text = "(no selection)";
@@ -200,13 +221,13 @@ public partial class PropertyPanel : UserControl
         var nameLabel = new TextBlock
         {
             Text = leaf.Name,
-            Foreground = new SolidColorBrush(Color.FromRgb(180, 200, 240)),
             FontFamily = MonoFont,
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(4, 4, 4, 4),
             TextTrimming = TextTrimming.CharacterEllipsis,
-            ToolTip = leaf.Name,
         };
+        MarkDefault(leaf, nameLabel);
+        _nameLabels.Add((leaf, nameLabel));
         Grid.SetColumn(nameLabel, 1);
         row.Children.Add(nameLabel);
 

@@ -132,6 +132,10 @@ public sealed class LaidOutElement
     public HudBlock Block => Spec.Block;
     public ElementKind Kind => Spec.Kind;
     public LaidOutElement? Parent { get; init; }
+
+    /// <summary>The file it came from, and how that file is laid out (its own <c>FileInfo</c>).</summary>
+    public required HudDocument Document { get; init; }
+    public required HudFileLayout FileLayout { get; init; }
     public List<LaidOutElement> Children { get; } = new();
 
     /// <summary>0 for an element at the top of the file.</summary>
@@ -273,11 +277,19 @@ public sealed class LaidOutElement
     public int DrawIndex { get; set; }
 }
 
-/// <summary>A document laid out for one screen and target.</summary>
+/// <summary>The files of a HUD laid out together for one screen and target.</summary>
 public sealed class HudLayoutResult
 {
     public required LayoutOptions Options { get; init; }
-    public required HudFileLayout File { get; init; }
+
+    /// <summary>Each file in load order, with how its own <c>FileInfo</c> lays it out.</summary>
+    public required IReadOnlyList<(HudDocument Document, HudFileLayout Layout)> Files { get; init; }
+
+    /// <summary>The first file's layout, for a HUD of one file.</summary>
+    public HudFileLayout File => Files[0].Layout;
+
+    public HudFileLayout? LayoutOf(HudDocument document) =>
+        Files.FirstOrDefault(f => ReferenceEquals(f.Document, document)).Layout;
     public required IReadOnlyList<LaidOutElement> Roots { get; init; }
     public required IReadOnlyDictionary<HudBlock, LaidOutElement> ByBlock { get; init; }
 

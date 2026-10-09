@@ -7,7 +7,6 @@ public sealed class UndoManager
     private readonly LinkedList<IHudEdit> _undo = new();
     private readonly Stack<IHudEdit> _redo = new();
     private readonly int _capacity;
-    private IHudEdit? _savedMarker;
 
     public UndoManager(int capacity = 500) { _capacity = capacity; }
 
@@ -16,21 +15,10 @@ public sealed class UndoManager
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
 
-    /// <summary>True when current stack top differs from the one recorded at last save.</summary>
-    public bool IsDirty => !ReferenceEquals(_undo.Count == 0 ? null : _undo.Last!.Value, _savedMarker);
-
-    /// <summary>Called after pushing/popping to re-anchor the "clean" state to the current top.</summary>
-    public void MarkSaved()
-    {
-        _savedMarker = _undo.Count == 0 ? null : _undo.Last!.Value;
-        Changed?.Invoke(this, EventArgs.Empty);
-    }
-
     public void Clear()
     {
         _undo.Clear();
         _redo.Clear();
-        _savedMarker = null;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

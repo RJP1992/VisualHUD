@@ -70,6 +70,16 @@ public sealed class AssetFolderTests : IDisposable
         Assert.Null(resolver.FindFont("gamefont_large"));
     }
 
+    [Theory]
+    [InlineData(@"C:\BF2_ModTools\data_BF3\Common\hud\legacy_gameext_hud.hud", @"C:\BF2_ModTools\data_BF3")]
+    [InlineData(@"C:\BF2_ModTools\data_BF3\common\HUD\maps\minimap.hud", @"C:\BF2_ModTools\data_BF3")]
+    [InlineData(@"C:\BF2_ModTools\data\Common\hud\1playerhud.hud", @"C:\BF2_ModTools\data")]
+    [InlineData(@"C:\Users\someone\Desktop\my.hud", null)]
+    [InlineData(@"C:\mods\hud\my.hud", null)]
+    [InlineData(@"D:\Common\hud\my.hud", null)]   // never a whole drive
+    public void A_Hud_Files_Mod_Data_Folder(string hudPath, string? expected) =>
+        Assert.Equal(expected, AssetResolver.ModDataFolderOf(hudPath));
+
     [Fact]
     public void The_Check_Lists_What_The_Files_Name()
     {

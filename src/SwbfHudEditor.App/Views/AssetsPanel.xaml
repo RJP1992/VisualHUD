@@ -13,7 +13,7 @@
                 <CheckBox x:Name="MissingOnlyBox" Content="Missing only" IsChecked="True" Foreground="#bbb"
                           VerticalAlignment="Center" Margin="6,0,0,4" Checked="Filter_Changed" Unchecked="Filter_Changed" />
             </WrapPanel>
-            <TextBlock Text="Asset folders, searched with all their subfolders after the HUD's own folders and the stock ones:"
+            <TextBlock Text="Asset folders, searched with all their subfolders after the HUD's own folders and the stock ones. The open files' mod data folders and the stock data folder are searched automatically:"
                        Foreground="#888" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,2" />
             <TextBlock x:Name="NoFoldersText" Text="(none)" Foreground="#888" FontStyle="Italic" FontSize="11" />
             <ItemsControl x:Name="FolderList">
@@ -22,7 +22,8 @@
                         <DockPanel Margin="0,1" ToolTip="{Binding Folder}">
                             <Button DockPanel.Dock="Left" Content="×" Width="18" Padding="0" Margin="0,0,4,0"
                                     VerticalAlignment="Center" Foreground="#dc7878" Background="#2c3440" BorderBrush="#404040"
-                                    ToolTip="Stop searching this folder" Tag="{Binding Folder}" Click="RemoveFolder_Click" />
+                                    ToolTip="Stop searching this folder" Tag="{Binding Folder}" Click="RemoveFolder_Click"
+                                    Visibility="{Binding RemoveVisibility}" />
                             <StackPanel>
                                 <TextBlock Text="{Binding Folder}" Foreground="#d4e8ff" TextTrimming="CharacterEllipsis" />
                                 <TextBlock Text="{Binding Status}" Foreground="#888" FontSize="10" TextTrimming="CharacterEllipsis" />

@@ -25,8 +25,11 @@ public sealed class AssetRow
                              string.Join("\n", Asset.UsedBy.Take(30)) + (Asset.UsedBy.Count > 30 ? $"\n... and {Asset.UsedBy.Count - 30} more" : string.Empty);
 }
 
-/// <summary>An asset folder and what its scan found.</summary>
-public sealed record AssetFolderRow(string Folder, string Status);
+/// <summary>An asset folder and what its scan found. An automatic one, searched for the open files, cannot be removed.</summary>
+public sealed record AssetFolderRow(string Folder, string Status, bool Automatic)
+{
+    public Visibility RemoveVisibility => Automatic ? Visibility.Hidden : Visibility.Visible;
+}
 
 /// <summary>
 /// The textures, models, fonts and localization the open HUD's files name, where each was found or

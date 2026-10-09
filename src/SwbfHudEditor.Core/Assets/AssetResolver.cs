@@ -121,6 +121,22 @@ public sealed class AssetResolver
         return idx;
     }
 
+    /// <summary>
+    /// The data folder of the mod a HUD file belongs to, the folder holding its <c>Common</c>, when
+    /// the file is in <c>Common\hud</c> or a folder inside it, as the mod tools lay a mod out; else
+    /// null. A drive's root is never one.
+    /// </summary>
+    public static string? ModDataFolderOf(string hudFilePath)
+    {
+        var folder = Path.GetDirectoryName(Path.GetFullPath(hudFilePath));
+        for (var dir = folder is null ? null : new DirectoryInfo(folder); dir?.Parent is { } parent; dir = parent)
+        {
+            if (dir.Name.Equals("hud", StringComparison.OrdinalIgnoreCase) && parent.Name.Equals("Common", StringComparison.OrdinalIgnoreCase))
+                return parent.Parent is { Parent: not null } data ? data.FullName : null;
+        }
+        return null;
+    }
+
     public static AssetResolver ForHudFile(string hudFilePath, string? stockDataCommonPath = null) =>
         ForHudFiles(new[] { hudFilePath }, stockDataCommonPath);
 

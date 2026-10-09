@@ -168,7 +168,7 @@
         <CommandBinding Command="{x:Static ApplicationCommands.Undo}" Executed="Undo_Executed" CanExecute="Undo_CanExecute" />
         <CommandBinding Command="{x:Static ApplicationCommands.Redo}" Executed="Redo_Executed" CanExecute="Redo_CanExecute" />
         <CommandBinding Command="{x:Static NavigationCommands.Refresh}" Executed="Reload_Executed" CanExecute="Reload_CanExecute" />
-        <CommandBinding Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" Executed="ToggleHideSelected_Executed" />
-        <CommandBinding Command="{x:Static local:MainWindow.UnhideAllCommand}" Executed="UnhideAll_Executed" />
+        <CommandBinding Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" Executed="ToggleHideSelected_Executed" CanExecute="HideCommand_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.UnhideAllCommand}" Executed="UnhideAll_Executed" CanExecute="HideCommand_CanExecute" />
     </Window.CommandBindings>
 </Window>

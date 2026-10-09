@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, AssetFolderIndex> _folderIndexes = new(HudFileSet.PathComparer);
     private readonly Dictionary<string, string> _folderErrors = new(HudFileSet.PathComparer);
     private readonly Dictionary<string, int> _scanGeneration = new(HudFileSet.PathComparer);
+    private readonly HashSet<string> _scanning = new(HudFileSet.PathComparer);
     private readonly Dictionary<string, IReadOnlyList<string>> _meshTextures = new(StringComparer.OrdinalIgnoreCase);
     private AssetResolver? _assets;
     private bool _assetListStale = true;
@@ -78,10 +79,10 @@ public partial class MainWindow : Window
         AssetsList.RescanRequested += (_, _) =>
         {
             _meshTextures.Clear();
-            foreach (var folder in _settings.AssetFolders) ScanAssetFolder(folder);
+            foreach (var folder in SearchedAssetFolders()) ScanAssetFolder(folder);
         };
         ShowAssetFolders();
-        foreach (var folder in _settings.AssetFolders) ScanAssetFolder(folder);
+        foreach (var folder in SearchedAssetFolders()) ScanAssetFolder(folder, report: false);
     }
 
     private IReadOnlyList<HudDocument> Documents => _files.Select(f => f.Document).ToList();
@@ -303,6 +304,9 @@ public partial class MainWindow : Window
     private void AfterSetChanged(string? status = null)
     {
         _defaultLines = null;
+        // The data folders of the open files' mods join the search, read the first time they are needed.
+        foreach (var folder in AutomaticAssetFolders()) EnsureScanned(folder);
+        ShowAssetFolders();
         var localization = LoadAssets();
         RefreshEventList();
         Properties.SetBlock(null);
@@ -335,9 +339,28 @@ public partial class MainWindow : Window
         return localization;
     }
 
-    /// <summary>The asset folders whose scan has finished, in the order they were added.</summary>
+    /// <summary>The asset folders read so far, in search order.</summary>
     private IEnumerable<AssetFolderIndex> ReadAssetFolders() =>
-        _settings.AssetFolders.Where(_folderIndexes.ContainsKey).Select(f => _folderIndexes[f]);
+        SearchedAssetFolders().Where(_folderIndexes.ContainsKey).Select(f => _folderIndexes[f]);
+
+    /// <summary>Every asset folder in search order: the automatic ones, then those added.</summary>
+    private IReadOnlyList<string> SearchedAssetFolders() =>
+        AutomaticAssetFolders().Concat(_settings.AssetFolders).Distinct(HudFileSet.PathComparer).ToList();
+
+    private IReadOnlyList<string> AutomaticAssetFolders() =>
+        AutomaticAssetFoldersFor(UserFiles.Select(f => f.FilePath).OfType<string>());
+
+    /// <summary>
+    /// The folders searched, with all their subfolders, without being added: the data folder of the
+    /// mod each file belongs to (<c>data_BF3</c> for <c>data_BF3\Common\hud\x.hud</c>), then the stock
+    /// data folder.
+    /// </summary>
+    internal static IReadOnlyList<string> AutomaticAssetFoldersFor(IEnumerable<string> hudPaths)
+    {
+        var folders = hudPaths.Select(AssetResolver.ModDataFolderOf).OfType<string>().ToList();
+        if (Path.GetDirectoryName(StockDataCommon) is { } stock && Directory.Exists(stock)) folders.Add(stock);
+        return folders.Distinct(HudFileSet.PathComparer).ToList();
+    }
 
     /// <summary>The resolver for a HUD's files: their folders, the stock ones, then these asset folders.</summary>
     internal static AssetResolver ResolverFor(IEnumerable<string> hudPaths, IEnumerable<AssetFolderIndex> folders)
@@ -392,48 +415,63 @@ public partial class MainWindow : Window
     private void RemoveAssetFolder(string folder)
     {
         _settings.AssetFolders.RemoveAll(f => HudFileSet.PathComparer.Equals(f, folder));
-        _folderIndexes.Remove(folder);
-        _folderErrors.Remove(folder);
         var error = _settings.Save();
         ShowAssetFolders();
         if (_files.Count > 0) LoadAssets();
         StatusText.Text = error is null ? $"No longer searching {folder}." : $"Could not save the settings: {error}";
     }
 
-    /// <summary>Read an asset folder with all its subfolders away from the window, then draw with what it holds.</summary>
-    private async void ScanAssetFolder(string folder)
+    /// <summary>Read a folder unless it has been read, or is being read, already.</summary>
+    private void EnsureScanned(string folder)
+    {
+        if (_folderIndexes.ContainsKey(folder) || _folderErrors.ContainsKey(folder) || _scanning.Contains(folder)) return;
+        ScanAssetFolder(folder, report: false);
+    }
+
+    /// <summary>
+    /// Read an asset folder with all its subfolders away from the window, then draw with what it holds.
+    /// What a folder holds is kept for the session, so a mod opened again is not read again.
+    /// </summary>
+    private async void ScanAssetFolder(string folder, bool report = true)
     {
         var generation = _scanGeneration.GetValueOrDefault(folder) + 1;
         _scanGeneration[folder] = generation;
+        _scanning.Add(folder);
         _folderIndexes.Remove(folder);
         _folderErrors.Remove(folder);
         ShowAssetFolders();
-        StatusText.Text = $"Scanning {folder}...";
+        if (report) StatusText.Text = $"Scanning {folder}...";
 
         AssetFolderIndex? index = null;
         string? error = null;
         try { index = await Task.Run(() => AssetFolderIndex.Scan(folder)); }
         catch (Exception ex) { error = ex.Message; }
 
-        // Removed, or scanned again, in the meantime.
-        if (!_settings.AssetFolders.Contains(folder, HudFileSet.PathComparer) || _scanGeneration[folder] != generation) return;
-        if (index is null)
-        {
-            _folderErrors[folder] = error ?? "unknown error";
-            ShowAssetFolders();
-            StatusText.Text = $"Could not read {folder}: {error}";
-            return;
-        }
-        _folderIndexes[folder] = index;
+        // Scanned again in the meantime.
+        if (_scanGeneration[folder] != generation) return;
+        _scanning.Remove(folder);
+        if (index is null) _folderErrors[folder] = error ?? "unknown error";
+        else _folderIndexes[folder] = index;
         ShowAssetFolders();
-        if (_files.Count > 0) LoadAssets();
-        StatusText.Text = $"Scanned {folder}: {Describe(index)}.";
+        if (_files.Count > 0 && SearchedAssetFolders().Contains(folder, HudFileSet.PathComparer)) LoadAssets();
+        if (report) StatusText.Text = index is null ? $"Could not read {folder}: {error}" : $"Scanned {folder}: {Describe(index)}.";
     }
 
-    private void ShowAssetFolders() => AssetsList.ShowFolders(_settings.AssetFolders.Select(folder => new AssetFolderRow(folder,
-        _folderErrors.TryGetValue(folder, out var error) ? $"could not be read: {error}"
-        : _folderIndexes.TryGetValue(folder, out var index) ? (Directory.Exists(folder) ? Describe(index) : "not found")
-        : "scanning...")).ToList());
+    /// <summary>The Assets tab's folder list: the automatic folders, then those added, which can be removed.</summary>
+    private void ShowAssetFolders()
+    {
+        AssetFolderRow Row(string folder, bool automatic)
+        {
+            var status = _folderErrors.TryGetValue(folder, out var error) ? $"could not be read: {error}"
+                : _folderIndexes.TryGetValue(folder, out var index) ? (Directory.Exists(folder) ? Describe(index) : "not found")
+                : "scanning...";
+            return new AssetFolderRow(folder, automatic ? $"searched automatically · {status}" : status, automatic);
+        }
+        AssetsList.ShowFolders(AutomaticAssetFolders()
+            .Where(f => !_settings.AssetFolders.Contains(f, HudFileSet.PathComparer)).Select(f => Row(f, automatic: true))
+            .Concat(_settings.AssetFolders.Select(f => Row(f, automatic: false)))
+            .ToList());
+    }
 
     private static string Describe(AssetFolderIndex index) =>
         $"{index.Textures.Count:N0} textures, {index.Meshes.Count:N0} meshes, {index.Fonts.Count:N0} fonts in {index.FileCount:N0} files";
@@ -747,10 +785,20 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// H and Alt+H are bound for the whole window. While a text box has focus they stand aside and
+    /// let the key go on, so the box gets its "h": a key bound to a command that cannot run is still
+    /// taken unless the routing continues.
+    /// </summary>
+    private void HideCommand_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = Keyboard.FocusedElement is not TextBoxBase;
+        e.ContinueRouting = !e.CanExecute;
+    }
+
     /// <summary>H keybinding — toggles the selected block's, or file's, visibility on the canvas.</summary>
     private void ToggleHideSelected_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (Keyboard.FocusedElement is TextBoxBase) return;
         switch (Tree.SelectedItem)
         {
             case HudBlock block:
@@ -771,7 +819,6 @@ public partial class MainWindow : Window
     /// <summary>Alt+H keybinding — unhides every hidden block and file.</summary>
     private void UnhideAll_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (Keyboard.FocusedElement is TextBoxBase) return;
         var count = 0;
         foreach (var file in _files)
         {

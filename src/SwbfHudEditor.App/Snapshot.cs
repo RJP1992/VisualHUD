@@ -19,8 +19,8 @@ namespace SwbfHudEditor.App;
 /// </code>
 /// <c>--add</c>, repeated, loads more files after the first, as the game loads a HUD's files: each laid
 /// out by its own <c>FileInfo</c>. The transform files beside them load first, as in the editor.
-/// Assets are found as in the editor, its saved asset folders included; <c>--assets folder</c>,
-/// repeated, searches more.
+/// Assets are found as in the editor: the files' mod data folders and the stock data folder are
+/// searched automatically, then its saved asset folders; <c>--assets folder</c>, repeated, searches more.
 /// <c>--background</c> draws the HUD over an image of the same size, such as an in-game screenshot.
 /// <c>--preset onfoot</c> sends the Events tab's on-foot scenario, then <c>--send</c>, repeated, sends
 /// more events in that order (a value typed as in the Events tab).
@@ -64,7 +64,7 @@ internal static class Snapshot
         string? dump = null;
         string? preset = null;
         var paths = new List<string> { hudPath };
-        var assetFolders = new List<string>(AppSettings.Load().AssetFolders);
+        var assetFolders = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
@@ -114,8 +114,9 @@ internal static class Snapshot
         }
 
         var docs = HudFileSet.Load(paths);
-        var assets = MainWindow.ResolverFor(paths,
-            assetFolders.Distinct(HudFileSet.PathComparer).Select(folder => AssetFolderIndex.Scan(folder)).ToList());
+        var assets = MainWindow.ResolverFor(paths, MainWindow.AutomaticAssetFoldersFor(paths)
+            .Concat(AppSettings.Load().AssetFolders).Concat(assetFolders)
+            .Distinct(HudFileSet.PathComparer).Select(folder => AssetFolderIndex.Scan(folder)).ToList());
         var canvas = new HudCanvas();
         canvas.Configure(target, screen, snap, viewport, placeholders, guides);
         canvas.LoadDocuments(docs, assets, MainWindow.TryLoadLocalization(assets));

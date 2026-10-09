@@ -53,13 +53,17 @@ by its own `FileInfo`. The editor works on such a set:
 
 Textures, meshes, fonts and the English localization are looked up in the HUD's own folders
 (the `hud` folder and its `Common` folder's `interface`, `effects`, `mshs`, `fonts` and
-`Localize`), then in `C:\BF2_ModTools\data\Common`.
+`Localize`), then in `C:\BF2_ModTools\data\Common`, then in the asset folders.
 
-- **File > Add asset folder** adds folders that are searched, with all their subfolders, for
-  whatever those do not have: a mod's whole data folder, say, whose HUD models sit under
-  `Sides`. A name found in several places resolves to the first path in alphabetical order.
-- Asset folders are remembered in `%LOCALAPPDATA%\VisualHUD\settings.json` and read in the
-  background each time the editor starts. A large folder (all of `C:\BF2_ModTools` is about
+- **Searched automatically:** the data folder of the mod each open file belongs to, with all
+  its subfolders (all of `data_BF3`, its `Sides` and `Load` included, for a file in
+  `data_BF3\Common\hud`), then the stock `C:\BF2_ModTools\data`. This needs the mod tools'
+  `<data>\Common\hud` layout; a file elsewhere gets no automatic folder.
+- **File > Add asset folder** adds more folders, searched the same way after those, for
+  whatever none of them has. A name found in several places resolves to the first path in
+  alphabetical order.
+- Added folders are remembered in `%LOCALAPPDATA%\VisualHUD\settings.json`. Every folder is
+  read in the background, once per session. A large folder (all of `C:\BF2_ModTools` is about
   450,000 files) takes some seconds.
 - The **Assets** tab lists what the open files name, where each was found, or that it is
   missing, and what uses it:
@@ -67,7 +71,8 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
   - meshes: `Mesh`, `MeshInfo`, and the transforms' `NameMesh` rows;
   - fonts: `TextFont`, a `.fff` file;
   - the localization file.
-- **Rescan** reads the folders again after files were added to them; the × removes a folder.
+- **Rescan** reads the folders again after files were added to them; the × removes an added
+  folder.
 - Textures are `.tga` files and models `.msh` files, as the game's munge reads them; a `.png`
   does not count. Fonts are checked only: text is still drawn with a system font.
 
@@ -117,7 +122,8 @@ VisualHUD.exe --snapshot file.hud out.png --screen 1920x1080 --game vanilla
 ```
 
 Options: `--add other.hud` (repeatable: more files of the HUD, loaded after the first, as in
-the editor), `--assets folder` (repeatable: asset folders besides the editor's saved ones),
+the editor), `--assets folder` (repeatable: asset folders besides the automatic ones and the
+editor's saved ones),
 `--screen WxH`, `--game gameext|vanilla`, `--snap on|off`, `--viewport n`,
 `--background image.png` (draw over a screenshot of the same size), `--no-placeholders`,
 `--no-guides`, `--preset onfoot` and `--send event[=value]` (repeatable, in order) to simulate

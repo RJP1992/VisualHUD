@@ -48,8 +48,6 @@ public sealed class TextFonts
 public sealed class TextFont
 {
     private static readonly GlyphTypeface? Face = LoadFace();
-    // Each glyph's coverage as an opacity mask, as the game's four-bit texture holds it.
-    private readonly Dictionary<char, ImageBrush?> _masks = new();
 
     public TextFont(ITextFont metrics)
     {
@@ -67,23 +65,114 @@ public sealed class TextFont
     internal static GlyphTypeface? Typeface => Face;
     internal double EmSize { get; }
 
-    /// <summary>Draw the characters where the layout placed them, in the element's own pixels.</summary>
-    public void Draw(DrawingContext dc, IReadOnlyList<PlacedGlyph> glyphs, Brush brush)
+    /// <summary>
+    /// The text in one image, for a game font: each glyph's image at its ink box in the cell, in the
+    /// text's colour, its coverage at the sixteen levels the game's textures keep, with the shadow one
+    /// pixel down and right under it. Null for a stand-in font, which <see cref="Draw"/> draws.
+    /// <paramref name="area"/> is where the image goes, in the element's own pixels.
+    /// </summary>
+    public BitmapSource? Render(IReadOnlyList<PlacedGlyph> glyphs, Color color, bool shadow, out Rect area)
     {
-        if (Metrics is FffFont font)
+        area = Rect.Empty;
+        if (Metrics is not FffFont font) return null;
+        var placed = new List<(GlyphImage Image, double X, double Y, double ScaleX, double ScaleY)>();
+        foreach (var g in glyphs)
         {
-            // The glyph's image at its ink box in the cell, filled with the text's colour.
-            foreach (var g in glyphs)
+            if (font.ImageOf(g.Char) is not { Width: > 0, Height: > 0 } image) continue;
+            var x = g.X + g.Glyph.Left * g.ScaleX;
+            var y = g.Y + g.Glyph.Top * g.ScaleY;
+            placed.Add((image, x, y, g.ScaleX, g.ScaleY));
+            area.Union(new Rect(x, y, image.Width * g.ScaleX, image.Height * g.ScaleY));
+            if (shadow) area.Union(new Rect(x + 1, y + 1, image.Width * g.ScaleX, image.Height * g.ScaleY));
+        }
+        if (area.IsEmpty) return null;
+        var left = (int)Math.Floor(area.Left);
+        var top = (int)Math.Floor(area.Top);
+        var width = Math.Min(8192, (int)Math.Ceiling(area.Right) - left);
+        var height = Math.Min(8192, (int)Math.Ceiling(area.Bottom) - top);
+        if (width <= 0 || height <= 0) return null;
+
+        // Coverage of the shadow and of the text, then the text over its shadow.
+        var shadowCover = shadow ? new float[width * height] : null;
+        var textCover = new float[width * height];
+        foreach (var (image, x, y, sx, sy) in placed)
+        {
+            if (shadowCover is not null) Stamp(shadowCover, width, height, image, x + 1 - left, y + 1 - top, sx, sy);
+            Stamp(textCover, width, height, image, x - left, y - top, sx, sy);
+        }
+        var pixels = new byte[width * height * 4];
+        for (var i = 0; i < textCover.Length; i++)
+        {
+            var t = textCover[i];
+            var a = t + (shadowCover is null ? 0f : shadowCover[i] * (1f - t));
+            if (a <= 0f) continue;
+            pixels[i * 4] = (byte)(color.B * t + 0.5f);       // premultiplied: the shadow adds black
+            pixels[i * 4 + 1] = (byte)(color.G * t + 0.5f);
+            pixels[i * 4 + 2] = (byte)(color.R * t + 0.5f);
+            pixels[i * 4 + 3] = (byte)(Math.Min(1f, a) * 255f + 0.5f);
+        }
+        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Pbgra32, null, pixels, width * 4);
+        bitmap.Freeze();
+        area = new Rect(left, top, width, height);
+        return bitmap;
+    }
+
+    /// <summary>A glyph's coverage laid into a buffer at (x, y), scaled; its pixel centres sampled between texels.</summary>
+    private static void Stamp(float[] into, int width, int height, GlyphImage image, double x, double y, double sx, double sy)
+    {
+        if (sx == 1 && sy == 1 && x == Math.Floor(x) && y == Math.Floor(y))
+        {
+            // The common case: texel to pixel.
+            int ox = (int)x, oy = (int)y;
+            for (var j = 0; j < image.Height; j++)
             {
-                if (font.ImageOf(g.Char) is not { } image || MaskOf(g.Char, image) is not { } mask) continue;
-                dc.PushTransform(new MatrixTransform(g.ScaleX, 0, 0, g.ScaleY, g.X, g.Y));
-                dc.PushOpacityMask(mask);
-                dc.DrawRectangle(brush, null, new Rect(g.Glyph.Left, g.Glyph.Top, image.Width, image.Height));
-                dc.Pop();
-                dc.Pop();
+                var py = oy + j;
+                if ((uint)py >= (uint)height) continue;
+                for (var i = 0; i < image.Width; i++)
+                {
+                    var px = ox + i;
+                    if ((uint)px >= (uint)width) continue;
+                    var c = GlyphImage.InGame(image.Alpha[j * image.Width + i]) / 255f;
+                    var at = py * width + px;
+                    into[at] = c + into[at] * (1f - c);
+                }
             }
             return;
         }
+        var x0 = (int)Math.Floor(x);
+        var y0 = (int)Math.Floor(y);
+        var x1 = (int)Math.Ceiling(x + image.Width * sx);
+        var y1 = (int)Math.Ceiling(y + image.Height * sy);
+        for (var py = Math.Max(0, y0); py < Math.Min(height, y1); py++)
+            for (var px = Math.Max(0, x0); px < Math.Min(width, x1); px++)
+            {
+                var u = (px + 0.5 - x) / sx - 0.5;
+                var v = (py + 0.5 - y) / sy - 0.5;
+                var c = Sample(image, u, v);
+                if (c <= 0f) continue;
+                var at = py * width + px;
+                into[at] = c + into[at] * (1f - c);
+            }
+    }
+
+    private static float Sample(GlyphImage image, double u, double v)
+    {
+        if (u < -1 || v < -1 || u > image.Width || v > image.Height) return 0f;
+        var iu = (int)Math.Floor(u);
+        var iv = (int)Math.Floor(v);
+        var fu = (float)(u - iu);
+        var fv = (float)(v - iv);
+        float Texel(int i, int j) => (uint)i < (uint)image.Width && (uint)j < (uint)image.Height
+            ? GlyphImage.InGame(image.Alpha[j * image.Width + i]) / 255f
+            : 0f;
+        var top = Texel(iu, iv) * (1 - fu) + Texel(iu + 1, iv) * fu;
+        var bottom = Texel(iu, iv + 1) * (1 - fu) + Texel(iu + 1, iv + 1) * fu;
+        return top * (1 - fv) + bottom * fv;
+    }
+
+    /// <summary>Draw a stand-in font's characters where the layout placed them, in the element's own pixels.</summary>
+    public void Draw(DrawingContext dc, IReadOnlyList<PlacedGlyph> glyphs, Brush brush)
+    {
         if (Face is null) return;
         foreach (var g in glyphs)
         {
@@ -97,22 +186,6 @@ public sealed class TextFont
             dc.DrawGlyphRun(brush, run);
             dc.Pop();
         }
-    }
-
-    private ImageBrush? MaskOf(char c, GlyphImage image)
-    {
-        if (_masks.TryGetValue(c, out var cached)) return cached;
-        var pixels = new byte[image.Width * image.Height * 4];
-        for (var i = 0; i < image.Alpha.Length; i++)
-        {
-            var a = GlyphImage.InGame(image.Alpha[i]);
-            pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = pixels[i * 4 + 3] = a;
-        }
-        var bitmap = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, pixels, image.Width * 4);
-        bitmap.Freeze();
-        var brush = new ImageBrush(bitmap) { Stretch = Stretch.Fill };
-        brush.Freeze();
-        return _masks[c] = brush;
     }
 
     private static GlyphTypeface? LoadFace()
@@ -162,6 +235,9 @@ internal sealed class TextGlyphsVisual : FrameworkElement
     private readonly bool _shadow;
     private readonly Rect? _box;
     private readonly Rect _bounds;
+    // A game font's text, drawn once into an image.
+    private readonly BitmapSource? _image;
+    private readonly Rect _imageArea;
 
     public TextGlyphsVisual(TextLayoutResult layout, TextFont font, Brush brush, bool shadow, Rect? box)
     {
@@ -170,6 +246,7 @@ internal sealed class TextGlyphsVisual : FrameworkElement
         _brush = brush;
         _shadow = shadow;
         _box = box;
+        if (brush is SolidColorBrush solid) _image = font.Render(layout.Glyphs, solid.Color, shadow, out _imageArea);
         // What can be clicked: the lines and the box.
         var bounds = Rect.Empty;
         foreach (var line in layout.Lines)
@@ -185,6 +262,12 @@ internal sealed class TextGlyphsVisual : FrameworkElement
     {
         if (!_bounds.IsEmpty) dc.DrawRectangle(Brushes.Transparent, null, _bounds);
         if (_box is { } box) dc.DrawRectangle(null, BoxPen, box);
+        if (_image is not null)
+        {
+            dc.DrawImage(_image, _imageArea);
+            return;
+        }
+        if (_font.FromGame) return;
         if (_shadow)
         {
             dc.PushTransform(new TranslateTransform(1, 1));

@@ -139,6 +139,17 @@
                 <MenuItem x:Name="EditRename" Header="Re_name" Click="Rename_Click" InputGestureText="F2"
                           ToolTipService.ShowOnDisabled="True" />
                 <MenuItem Header="_Delete" Click="DeleteSelected_Click" InputGestureText="Del" />
+                <Separator />
+                <MenuItem Header="Convert _units" ToolTip="Rewrite the Position, Rect and BitmapRect lines of the selection, and of everything in it, in another unit. They keep their place and size at the Screen chosen on the canvas, so choose the resolution they were made for first.">
+                    <MenuItem Header="To _Viewport" Tag="Viewport" Click="ConvertUnits_Click"
+                              ToolTip="Shares of the view: they follow the resolution, the usual choice." />
+                    <MenuItem Header="To _Screen" Tag="Screen" Click="ConvertUnits_Click"
+                              ToolTip="Shares of the whole screen." />
+                    <MenuItem Header="To _Frame (positions)" Tag="Frame" Click="ConvertUnits_Click"
+                              ToolTip="Shares of the group's Rect the element is in; only Position lines take it." />
+                    <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
+                              ToolTip="Screen pixels: they stay the same size at every resolution." />
+                </MenuItem>
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Hide or show the selection" Click="ToggleHide_Click" InputGestureText="H" />
@@ -267,6 +278,16 @@
                                     <MenuItem x:Name="TreeRename" Header="Rename" Click="Rename_Click" InputGestureText="F2"
                                               ToolTipService.ShowOnDisabled="True" />
                                     <MenuItem Header="Delete" Click="DeleteSelected_Click" InputGestureText="Del" />
+                                    <MenuItem Header="Convert _units" ToolTip="Rewrite the Position, Rect and BitmapRect lines of the selection, and of everything in it, in another unit. They keep their place and size at the Screen chosen on the canvas, so choose the resolution they were made for first.">
+                                        <MenuItem Header="To _Viewport" Tag="Viewport" Click="ConvertUnits_Click"
+                                                  ToolTip="Shares of the view: they follow the resolution, the usual choice." />
+                                        <MenuItem Header="To _Screen" Tag="Screen" Click="ConvertUnits_Click"
+                                                  ToolTip="Shares of the whole screen." />
+                                        <MenuItem Header="To _Frame (positions)" Tag="Frame" Click="ConvertUnits_Click"
+                                                  ToolTip="Shares of the group's Rect the element is in; only Position lines take it." />
+                                        <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
+                                                  ToolTip="Screen pixels: they stay the same size at every resolution." />
+                                    </MenuItem>
                                     <Separator />
                                     <!-- On the canvas only: what is hidden here is still in the file. -->
                                     <MenuItem Header="Show and hide">
@@ -300,7 +321,8 @@
                                  PropertyEdited="Properties_PropertyEdited"
                                  PropertyInsertRequested="Properties_PropertyInsertRequested"
                                  PropertyDeleteRequested="Properties_PropertyDeleteRequested"
-                                 RenameRequested="Properties_RenameRequested" />
+                                 RenameRequested="Properties_RenameRequested"
+                                 UnitChangeRequested="Properties_UnitChangeRequested" />
         </Grid>
     </DockPanel>
     <Window.InputBindings>

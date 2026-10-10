@@ -36,7 +36,7 @@ public class CanvasTests
         w.Files.SelectMany(f => f.Document.TopLevel).First(b => b.HasBody && b.ItemName == name);
 
     [Fact]
-    public void A_Send_Redraws_Only_What_It_Changed_And_An_Edit_Redraws_Everything()
+    public void A_Send_Or_An_Edit_Redraws_Only_What_It_Changed()
     {
         UiThread.WithWindow(Hud, (w, _) =>
         {
@@ -58,6 +58,11 @@ public class CanvasTests
             UiThread.Settle();
             Assert.Same(ammo, w.Canvas.VisualOf(Named(w, "ammo")));
 
+            // A refresh with nothing changed keeps it; an edit to its own lines draws it again.
+            w.Canvas.Refresh();
+            Assert.Same(label, w.Canvas.VisualOf(Named(w, "label")));
+            var text = Named(w, "label").Children.First(c => c.Name == "Text");
+            text.Arguments[0] = HudArgument.FromString("other");
             w.Canvas.Refresh();
             Assert.NotSame(label, w.Canvas.VisualOf(Named(w, "label")));
         });

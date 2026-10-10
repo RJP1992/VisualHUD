@@ -266,10 +266,14 @@ public partial class HudCanvas : UserControl
         Render();
     }
 
-    /// <summary>Re-render without re-parsing or re-resolving assets. Call after an edit or a visibility change.</summary>
+    /// <summary>
+    /// Re-render without re-parsing or re-resolving assets. Call after an edit or a visibility change:
+    /// the elements the edit did not change keep their visuals.
+    /// </summary>
     public void Refresh()
     {
         _clockStale = true;
+        _reuseVisuals = true;
         Render();
     }
 
@@ -369,10 +373,29 @@ public partial class HudCanvas : UserControl
     /// <summary>An element, or the <c>Piece</c>th piece its code built.</summary>
     private readonly record struct VisualId(HudBlock Block, int Piece);
 
-    /// <summary>Everything a value can change about how an element is drawn.</summary>
+    /// <summary>Everything that can change how an element is drawn: its values, and its own lines as written.</summary>
     private readonly record struct VisualSignature(ElementKind Kind, string? Texture, QuadRect? Quad, TexRect Uv, Vector3 Color,
         float Alpha, Matrix4x4 ToScreen, Matrix4x4 World, string? Mesh, float Depth, string? Mask, TexRect MaskUv, string? Text,
-        int BoxWidth, int BoxHeight, bool Shown, bool Simulated, int Segments);
+        int BoxWidth, int BoxHeight, bool Shown, bool Simulated, int Segments, int Lines);
+
+    /// <summary>
+    /// A block's own lines and the blocks inside it that are not elements (templates, MeshInfo, Format),
+    /// as written: an edit to any of them changes how the element is drawn. Elements inside it have their own.
+    /// </summary>
+    private static int LinesHash(HudBlock block)
+    {
+        var hash = new HashCode();
+        void Add(HudBlock b)
+        {
+            hash.Add(b.Name);
+            foreach (var a in b.Arguments) hash.Add(a.Raw);
+            foreach (var c in b.Children)
+                if (!ElementKinds.TryGet(c, out _))
+                    Add(c);
+        }
+        Add(block);
+        return hash.ToHashCode();
+    }
 
     private readonly Dictionary<VisualId, (VisualSignature Signature, FrameworkElement? Visual)> _visualCache = new();
     private bool _reuseVisuals;
@@ -396,8 +419,14 @@ public partial class HudCanvas : UserControl
         return new VisualSignature(e.Kind, e.Texture, e.Quad, e.Uv, e.DrawColor, e.DrawAlpha, e.ToScreen,
             e.Kind == ElementKind.Model3D ? e.World : default, e.Mesh, e.MeshDepth, e.Mask, e.MaskUv,
             e.Kind == ElementKind.Text ? e.Text ?? ShownText(e) : null, e.TextBoxWidth, e.TextBoxHeight, e.Shown,
-            e.Runtime is not null, segments);
+            e.Runtime is not null, segments, LinesHash(e.Piece?.Owner.Block ?? e.Block));
     }
+
+    /// <summary>How the canvas lays a block out now, if it is an element.</summary>
+    public LaidOutElement? LaidOut(HudBlock block) => _layout?.Find(block);
+
+    /// <summary>The resolution the canvas draws at.</summary>
+    public HudScreen ScreenSize => _screen;
 
     /// <summary>The visual an element is drawn with, for tests.</summary>
     internal FrameworkElement? VisualOf(HudBlock block) => _visuals.TryGetValue(block, out var v) ? v : null;
@@ -1215,6 +1244,7 @@ public partial class HudCanvas : UserControl
         var p = _dragPositionBlock;
         p.Arguments[0] = p.Arguments[0] with { Raw = FormatForKind(_dragStartValue.X + delta.X, p.Arguments[0].Kind) };
         p.Arguments[1] = p.Arguments[1] with { Raw = FormatForKind(_dragStartValue.Y + delta.Y, p.Arguments[1].Kind) };
+        _reuseVisuals = true;
         Render();
         BlockDragged?.Invoke(this, _dragBlock);
     }

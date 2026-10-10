@@ -73,6 +73,7 @@ public partial class MainWindow : Window
         Properties.IsDefaultLine = line => (_defaultLines ??= FindDefaultLines()).Contains(line);
         Properties.ParentOf = block => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
         Properties.KnownEvents = KnownEvents;
+        Properties.BasisOf = BasisFor;
         Properties.Preview = () => Canvas.Refresh();
         _undo.Changed += (_, _) =>
         {
@@ -1132,8 +1133,8 @@ public partial class MainWindow : Window
 
     private void Canvas_BlockDragged(object? sender, HudBlock block)
     {
-        // Refresh property panel so position values update live during drag.
-        Properties.SetBlock(block);
+        // The position's numbers follow the drag; the panel is built again only if the drag added a line.
+        if (!Properties.ShowsBlock(block) || !Properties.RefreshValues()) Properties.SetBlock(block);
     }
 
     private void Canvas_BlockDragCommitted(object? sender, IHudEdit edit)
@@ -1640,6 +1641,97 @@ public partial class MainWindow : Window
         renaming.Box.Visibility = Visibility.Collapsed;
         renaming.Label.Visibility = Visibility.Visible;
         if (commit) ApplyRename(renaming.Block, renaming.Box.Text);
+    }
+
+    // ---- Units: a line's numbers rewritten in another unit, so nothing moves ------------------------------
+
+    /// <summary>
+    /// The sizes a block's numbers are read against, as the canvas lays it out now: an element's own, and
+    /// for a block inside one (a MeshInfo, a template), its element's, a group's Rect being a template's frame.
+    /// </summary>
+    internal UnitBasis? BasisFor(HudBlock block)
+    {
+        var inner = false;
+        for (HudBlock? b = block; b is not null; b = ParentOf(b), inner = true)
+        {
+            if (Canvas.LaidOut(b) is not { } e) continue;
+            var groupFrame = inner && ElementKinds.IsGroupBased(e.Kind) && e.RectWidthPixels > 0 && e.RectHeightPixels > 0;
+            return new UnitBasis(
+                groupFrame ? e.RectWidthPixels : e.FrameWidth, groupFrame ? e.RectHeightPixels : e.FrameHeight,
+                e.ViewWidth, e.ViewHeight, e.ScreenWidth, e.ScreenHeight);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The edits that rewrite in <paramref name="to"/> the unit lines of these blocks and of every block in
+    /// them. A VehicleSeating's own Position is left: the game reads it as pixels whatever its mode.
+    /// </summary>
+    private List<IHudEdit> UnitEdits(IEnumerable<HudBlock> roots, RelativeMode to, List<string> skipped)
+    {
+        var edits = new List<IHudEdit>();
+        void Visit(HudBlock block)
+        {
+            foreach (var line in block.Children.Where(c => !c.HasBody && UnitConversion.Of(c.Name) is not null))
+            {
+                if (block.Name == "VehicleSeating" && line.Name == "Position")
+                {
+                    skipped.Add($"{block.Name} \"{block.ItemName}\" Position (read as pixels whatever its mode)");
+                    continue;
+                }
+                if (!UnitConversion.CanConvert(line, to) || BasisFor(block) is not { } basis) continue;
+                if (UnitConversion.Convert(line, to, basis) is { } args && !args.SequenceEqual(line.Arguments))
+                    edits.Add(new ReplaceArgumentsEdit(line, args, block));
+            }
+            foreach (var child in block.Children.Where(c => c.HasBody)) Visit(child);
+        }
+        foreach (var root in roots) Visit(root);
+        return edits;
+    }
+
+    /// <summary>Edit > Convert units: the selection and everything in it, or whole files, in one undo step.</summary>
+    internal int ConvertUnits(IReadOnlyList<object> items, RelativeMode to)
+    {
+        var roots = items.SelectMany(i => i switch
+        {
+            HudFile file => file.Document.TopLevel.Where(b => b.HasBody),
+            HudBlock block => new[] { block },
+            _ => Enumerable.Empty<HudBlock>(),
+        }).ToList();
+        var skipped = new List<string>();
+        var edits = UnitEdits(roots, to, skipped);
+        var at = Canvas.ScreenSize;
+        if (edits.Count == 0)
+        {
+            StatusText.Text = $"Nothing to convert to {to}: every Position, Rect and BitmapRect there is in it already, or cannot take it." +
+                              (skipped.Count > 0 ? $" Left: {string.Join("; ", skipped)}." : string.Empty);
+            return 0;
+        }
+        foreach (var edit in edits) edit.Apply();
+        _undo.Push(new CompositeEdit(edits, $"convert {edits.Count} lines to {to}"));
+        Canvas.Refresh();
+        Properties.SetBlock(Tree.SelectedItem as HudBlock);
+        StatusText.Text = $"Converted {edits.Count} line{(edits.Count == 1 ? "" : "s")} to {to}, keeping them where they are at {at.Width}×{at.Height}." +
+                          (skipped.Count > 0 ? $" Left: {string.Join("; ", skipped)}." : string.Empty);
+        return edits.Count;
+    }
+
+    private void ConvertUnits_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string name } && Enum.TryParse<RelativeMode>(name, out var to)) ConvertUnits(SelectedItems, to);
+    }
+
+    /// <summary>A unit chosen in the Properties panel: the line's numbers follow.</summary>
+    private void Properties_UnitChangeRequested(object? sender, UnitChangeRequestedEventArgs e)
+    {
+        if (BasisFor(e.Target) is not { } basis || UnitConversion.Convert(e.Line, e.To, basis) is not { } args) return;
+        var edit = new ReplaceArgumentsEdit(e.Line, args, e.Target);
+        edit.Apply();
+        _undo.Push(edit);
+        Canvas.Refresh();
+        Properties.SetBlock(e.Target);
+        var at = Canvas.ScreenSize;
+        StatusText.Text = $"{e.Line.Name} in {e.To}, where it was at {at.Width}×{at.Height}.";
     }
 
     private void Properties_RenameRequested(object? sender, RenameRequestedEventArgs e)

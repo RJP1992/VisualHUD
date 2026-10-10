@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using SwbfHudEditor.Core.Edits;
 using SwbfHudEditor.Core.Hud;
+using SwbfHudEditor.Core.Layout;
 
 namespace SwbfHudEditor.App.Views;
 
@@ -30,6 +31,9 @@ public sealed record PropertyDeleteRequestedEventArgs(HudBlock Target, HudBlock 
 /// <summary>Fired by the name box in the header: rename <see cref="Block"/> to <see cref="NewName"/>.</summary>
 public sealed record RenameRequestedEventArgs(HudBlock Block, string NewName);
 
+/// <summary>A unit chosen for a line whose numbers it reads: the host converts them, so nothing moves.</summary>
+public sealed record UnitChangeRequestedEventArgs(HudBlock Target, HudBlock Line, RelativeMode To);
+
 /// <summary>
 /// The selected block's lines, grouped as the Add tab groups what the game reads, each argument with
 /// an editor for what it takes: a name from a list, a flag, a colour, an event, a number or text.
@@ -38,6 +42,9 @@ public partial class PropertyPanel : UserControl
 {
     private HudBlock? _block;
     private readonly List<(HudBlock Leaf, TextBlock Label)> _nameLabels = new();
+    // The editors of the rows shown, for RefreshValues, and the lines the rows show.
+    private readonly List<(FrameworkElement Editor, HudBlock Leaf, int Index)> _editors = new();
+    private readonly List<HudBlock> _shownLeaves = new();
     // Sections closed by the user stay closed for the session.
     private static readonly HashSet<string> ClosedSections = new(StringComparer.Ordinal);
 
@@ -57,6 +64,10 @@ public partial class PropertyPanel : UserControl
     public event EventHandler<PropertyInsertRequestedEventArgs>? PropertyInsertRequested;
     public event EventHandler<PropertyDeleteRequestedEventArgs>? PropertyDeleteRequested;
     public event EventHandler<RenameRequestedEventArgs>? RenameRequested;
+    public event EventHandler<UnitChangeRequestedEventArgs>? UnitChangeRequested;
+
+    /// <summary>The sizes the shown block's numbers are read against, for numbers typed in pixels.</summary>
+    public Func<HudBlock, UnitBasis?>? BasisOf { get; set; }
 
     public PropertyPanel()
     {
@@ -72,6 +83,77 @@ public partial class PropertyPanel : UserControl
         if (NameBox.IsKeyboardFocusWithin && !ReferenceEquals(block, _block)) CommitName();
         _block = block;
         Rebuild();
+    }
+
+    // The rows are built a moment after a selection, so the tree and the canvas answer at once and
+    // only the last of a quick run of selections is built; the Add tab only when it is open.
+    private int _rowsVersion;
+    private bool _addStale;
+
+    /// <summary>Whether rows are waiting to be built.</summary>
+    public bool RowsPending { get; private set; }
+
+    private void ScheduleRows()
+    {
+        var version = ++_rowsVersion;
+        RowsPending = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+        {
+            if (version != _rowsVersion) return;
+            RowsPending = false;
+            RebuildEditTab();
+            _addStale = true;
+            if (Tabs.SelectedIndex == 1) BuildAddTabIfStale();
+        }));
+    }
+
+    /// <summary>The box that edits a line's argument, once the rows are built: for tests.</summary>
+    internal TextBox? BoxFor(HudBlock leaf, int index) =>
+        _editors.FirstOrDefault(e => ReferenceEquals(e.Leaf, leaf) && e.Index == index).Editor as TextBox;
+
+    /// <summary>Build the rows now, if they are waiting: for tests and for code that reads them at once.</summary>
+    public void FlushRows()
+    {
+        if (!RowsPending) return;
+        _rowsVersion++;
+        RowsPending = false;
+        RebuildEditTab();
+        _addStale = true;
+        if (Tabs.SelectedIndex == 1) BuildAddTabIfStale();
+    }
+
+    private void BuildAddTabIfStale()
+    {
+        if (!_addStale) return;
+        _addStale = false;
+        AddRows.Children.Clear();
+        RebuildAddTab();
+    }
+
+    private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, Tabs) && Tabs.SelectedIndex == 1) BuildAddTabIfStale();
+    }
+
+    /// <summary>Whether the panel shows this block.</summary>
+    public bool ShowsBlock(HudBlock block) => ReferenceEquals(block, _block);
+
+    /// <summary>
+    /// Put the lines' current values in their editors without building the rows again, as a drag changes
+    /// them; false when the block's lines are no longer the ones shown, so the rows must be built again.
+    /// </summary>
+    public bool RefreshValues()
+    {
+        if (_block is null || RowsPending) return false;
+        var leaves = _block.Children.Where(c => !c.HasBody).ToList();
+        if (leaves.Count != _shownLeaves.Count || leaves.Where((l, i) => !ReferenceEquals(l, _shownLeaves[i])).Any()) return false;
+        foreach (var (editor, leaf, index) in _editors)
+        {
+            if (editor.IsKeyboardFocusWithin || index >= leaf.Arguments.Count) continue;
+            var raw = leaf.Arguments[index].Raw;
+            if (editor is TextBox box && box.Text != raw) box.Text = raw;
+        }
+        return true;
     }
 
     /// <summary>Mark again the rows whose line restates a default, after an edit.</summary>
@@ -143,6 +225,8 @@ public partial class PropertyPanel : UserControl
         Rows.Children.Clear();
         AddRows.Children.Clear();
         _nameLabels.Clear();
+        _editors.Clear();
+        _shownLeaves.Clear();
         if (_block is null)
         {
             NameRow.Visibility = Visibility.Collapsed;
@@ -153,8 +237,7 @@ public partial class PropertyPanel : UserControl
             return;
         }
         RefreshHeader();
-        RebuildEditTab();
-        RebuildAddTab();
+        ScheduleRows();
     }
 
     // ── The lines ────────────────────────────────────────────────────────────────────
@@ -164,6 +247,7 @@ public partial class PropertyPanel : UserControl
         if (_block is null) return;
         var parent = ParentOf?.Invoke(_block);
         var leaves = _block.Children.Where(c => !c.HasBody).ToList();
+        _shownLeaves.AddRange(leaves);
         if (leaves.Count == 0) Rows.Children.Add(Hint("No lines yet: add what this block should read from the Add tab."));
 
         var groups = leaves
@@ -253,6 +337,9 @@ public partial class PropertyPanel : UserControl
             if (colorAt == i && i + 2 < leaf.Arguments.Count) panel.Children.Add(ColorSwatch(leaf, i));
             panel.Children.Add(ArgEditor(leaf, i));
         }
+        if (UnitConversion.Of(leaf.Name) is { } unit && leaf.Arguments.Count <= unit.Mode &&
+            UnitConversion.CanConvert(leaf, unit.Default))
+            panel.Children.Add(ImpliedUnitEditor(leaf, unit));
         return panel;
     }
 
@@ -268,52 +355,157 @@ public partial class PropertyPanel : UserControl
         var choices = arg.Kind == HudArgKind.String ? PropertyArguments.Choices(leaf.Name, index, _block?.Name) : null;
         if (choices is null && arg.Kind == HudArgKind.String && PropertyArguments.IsEvent(leaf.Name, index) && KnownEvents is not null)
             choices = KnownEvents();
-        if (choices is not null)
-        {
-            var combo = new ComboBox
-            {
-                IsEditable = true,
-                ItemsSource = choices,
-                Text = arg.Raw,
-                Width = 118,
-                Margin = new Thickness(0, 1, 4, 1),
-                ToolTip = tip,
-                Tag = (leaf, index),
-                FontFamily = (FontFamily)FindResource("MonoFont"),
-                IsTextSearchEnabled = true,
-                StaysOpenOnEdit = true,
-            };
-            combo.SelectionChanged += (_, e) =>
-            {
-                if (e.AddedItems.Count > 0 && e.AddedItems[0] is string picked) Commit(leaf, index, picked);
-            };
-            combo.LostKeyboardFocus += (_, _) =>
-            {
-                if (!combo.IsKeyboardFocusWithin) Commit(leaf, index, combo.Text);
-            };
-            combo.KeyDown += (_, e) =>
-            {
-                if (e.Key == Key.Enter)
-                {
-                    Commit(leaf, index, combo.Text);
-                    e.Handled = true;
-                }
-            };
-            return combo;
-        }
-
         var box = new TextBox
         {
+            Style = InlineBox,
             Text = arg.Raw,
-            FontFamily = (FontFamily)FindResource("MonoFont"),
-            Width = arg.Kind == HudArgKind.String ? 150 : 66,
+            FontFamily = Mono,
+            Width = choices is not null ? 118 : arg.Kind == HudArgKind.String ? 150 : 66,
             Margin = new Thickness(0, 1, 4, 1),
-            ToolTip = arg.Kind is HudArgKind.Integer or HudArgKind.Float ? $"{tip}: Up and Down change it (Shift by more, Ctrl by less)" : tip,
+            ToolTip = arg.Kind is HudArgKind.Integer or HudArgKind.Float
+                ? $"{tip}: Up and Down change it (Shift by more, Ctrl by less); sums such as 128/4 are worked out"
+                : tip,
             Tag = (leaf, index),
         };
         box.LostFocus += (_, _) => Commit(leaf, index, box.Text);
         box.PreviewKeyDown += (_, e) => Arg_KeyDown(box, leaf, index, e);
-        return box;
+        _editors.Add((box, leaf, index));
+        if (choices is null) return box;
+
+        // The list opens from a button at the box's right end, and is made only then.
+        box.Padding = new Thickness(4, 2, 18, 2);
+        var open = ChoicesButton();
+        open.Click += (_, _) => OpenList(box, choices, picked =>
+        {
+            box.Text = picked;
+            Commit(leaf, index, picked);
+        });
+        var grid = new Grid { Width = box.Width, Margin = box.Margin };
+        box.Margin = new Thickness(0);
+        grid.Children.Add(box);
+        grid.Children.Add(open);
+        return grid;
+    }
+
+    /// <summary>The unit names a line's mode takes: Frame only for a Position.</summary>
+    private static IReadOnlyList<string> UnitNames(UnitConversion.ModeLine unit) =>
+        unit.TakesFrame ? EngineArgs.RelativeModeNames : EngineArgs.RelativeModeNames.Take(3).ToList();
+
+    private static RelativeMode? UnitNamed(string text) =>
+        Array.FindIndex(EngineArgs.RelativeModeNames, n => string.Equals(n, text.Trim(), StringComparison.OrdinalIgnoreCase)) is var i and >= 0
+            ? (RelativeMode)i
+            : null;
+
+    /// <summary>
+    /// A line written without its mode: the unit the game reads its numbers in, greyed; another one
+    /// converts the numbers and writes the mode.
+    /// </summary>
+    private FrameworkElement ImpliedUnitEditor(HudBlock leaf, UnitConversion.ModeLine unit)
+    {
+        var implied = UnitConversion.ModeOf(leaf).ToString();
+        var box = new TextBox
+        {
+            Style = InlineBox,
+            Text = implied,
+            FontFamily = Mono,
+            FontStyle = FontStyles.Italic,
+            Foreground = Res("TextMutedBrush"),
+            Width = 118,
+            Padding = new Thickness(4, 2, 18, 2),
+            ToolTip = $"The unit the game reads these numbers in: none is written, so {implied}. Another converts them so nothing moves.",
+        };
+        void Take(string text)
+        {
+            if (_block is null || UnitNamed(text) is not { } to || string.Equals(text.Trim(), implied, StringComparison.OrdinalIgnoreCase)) return;
+            UnitChangeRequested?.Invoke(this, new UnitChangeRequestedEventArgs(_block, leaf, to));
+        }
+        box.LostFocus += (_, _) => Take(box.Text);
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            Take(box.Text);
+            e.Handled = true;
+        };
+        var open = ChoicesButton();
+        open.Click += (_, _) => OpenList(box, UnitNames(unit), Take);
+        var grid = new Grid { Width = box.Width, Margin = new Thickness(0, 1, 4, 1) };
+        grid.Children.Add(box);
+        grid.Children.Add(open);
+        return grid;
+    }
+
+    private Button ChoicesButton() => new()
+    {
+        Style = ToolButton,
+        Content = new TextBlock { Text = "\uE70D", Style = IconStyle, FontSize = 8 },
+        MinWidth = 16,
+        MinHeight = 16,
+        Width = 16,
+        Height = 18,
+        Padding = new Thickness(0),
+        HorizontalAlignment = HorizontalAlignment.Right,
+        Margin = new Thickness(0, 1, 5, 1),
+        Focusable = false,
+        ToolTip = "Choose from the list",
+    };
+
+    private Style? _inlineBox, _toolButton, _icon;
+    private FontFamily? _mono;
+    private Style InlineBox => _inlineBox ??= (Style)FindResource("InlineBox");
+    private Style ToolButton => _toolButton ??= (Style)FindResource("ToolButton");
+    private Style IconStyle => _icon ??= (Style)FindResource("Icon");
+    private FontFamily Mono => _mono ??= (FontFamily)FindResource("MonoFont");
+
+    /// <summary>A list of the choices under the box; a click, or Enter, takes one.</summary>
+    private void OpenList(TextBox box, IReadOnlyList<string> choices, Action<string> take)
+    {
+        var list = new ListBox
+        {
+            ItemsSource = choices,
+            MaxHeight = 260,
+            MinWidth = Math.Max(160, box.ActualWidth),
+            FontFamily = Mono,
+            SelectedItem = choices.FirstOrDefault(c => string.Equals(c, box.Text, StringComparison.OrdinalIgnoreCase)),
+        };
+        var popup = new Popup
+        {
+            PlacementTarget = box,
+            Placement = PlacementMode.Bottom,
+            StaysOpen = false,
+            AllowsTransparency = true,
+            Child = new Border
+            {
+                Background = Res("ElevatedBrush"),
+                BorderBrush = Res("BorderStrongBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(2),
+                Child = list,
+            },
+        };
+        void Take()
+        {
+            if (list.SelectedItem is not string picked) return;
+            popup.IsOpen = false;
+            take(picked);
+        }
+        list.PreviewMouseLeftButtonUp += (_, _) => Take();
+        list.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                Take();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                popup.IsOpen = false;
+                e.Handled = true;
+            }
+        };
+        popup.IsOpen = true;
+        if (list.SelectedItem is not null) list.ScrollIntoView(list.SelectedItem);
+        list.Focus();
     }
 
     private void Arg_KeyDown(TextBox box, HudBlock leaf, int index, KeyEventArgs e)
@@ -450,15 +642,54 @@ public partial class PropertyPanel : UserControl
         }
     }
 
-    /// <summary>Change one argument, if the text is one its kind takes, and tell the host.</summary>
+    /// <summary>
+    /// Change one argument, if the text is one its kind takes, and tell the host. A unit chosen for a line's
+    /// mode converts its numbers instead; a sum is worked out, and a number in pixels ("960px") is put in
+    /// the line's own unit.
+    /// </summary>
     private void Commit(HudBlock leaf, int index, string text)
     {
         var current = leaf.Arguments[index];
         if (text == current.Raw) return;
-        if (!IsValidForKind(text, current.Kind)) return;
-        var changed = current with { Raw = text };
+        if (_block is not null && UnitConversion.Of(leaf.Name) is { } unit && index == unit.Mode && UnitChangeRequested is not null &&
+            UnitNamed(text) is { } to && UnitConversion.CanConvert(leaf, to))
+        {
+            UnitChangeRequested.Invoke(this, new UnitChangeRequestedEventArgs(_block, leaf, to));
+            return;
+        }
+        var kind = current.Kind;
+        if (kind is HudArgKind.Integer or HudArgKind.Float && !IsValidForKind(text, kind))
+        {
+            if (WorkOut(leaf, index, text) is not { } worked) return;
+            // A number of a position or a size may take a fraction; any other whole number is rounded.
+            var fractional = worked != Math.Round(worked);
+            if (kind == HudArgKind.Integer && fractional && IsUnitNumber(leaf, index)) kind = HudArgKind.Float;
+            text = kind == HudArgKind.Integer
+                ? ((long)Math.Round(worked)).ToString(CultureInfo.InvariantCulture)
+                : HudArgument.FromFloat(worked).Raw;
+            if (text == current.Raw && kind == current.Kind) return;
+        }
+        if (!IsValidForKind(text, kind)) return;
+        var changed = new HudArgument(kind, text);
         leaf.Arguments[index] = changed;
         PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, new[] { new ArgChange(index, current, changed) }, _block));
+    }
+
+    private static bool IsUnitNumber(HudBlock leaf, int index) =>
+        UnitConversion.Of(leaf.Name) is { } unit && (index == unit.X || index == unit.Y) || leaf.Name == "TextBox" && index < 2;
+
+    /// <summary>A sum, or one in pixels ("(1920 - 64) / 2 px") in the line's own unit; null when it is neither.</summary>
+    private double? WorkOut(HudBlock leaf, int index, string text)
+    {
+        var t = text.Trim();
+        var pixels = t.EndsWith("px", StringComparison.OrdinalIgnoreCase);
+        if (pixels) t = t[..^2];
+        if (!NumberExpression.TryEvaluate(t, out var value)) return null;
+        if (!pixels) return value;
+        return _block is not null && BasisOf?.Invoke(_block) is { } basis &&
+               UnitConversion.FromPixels(leaf, index, (float)value, basis) is { } converted
+            ? Math.Round(converted, 6)
+            : null;
     }
 
     private static bool IsValidForKind(string text, HudArgKind kind) => kind switch

@@ -1,4 +1,5 @@
 using System.Globalization;
+using SwbfHudEditor.Core.Hud;
 using System.Numerics;
 
 namespace SwbfHudEditor.Core.Events;
@@ -22,7 +23,11 @@ public static class HudEventText
                 if (t.Equals("false", StringComparison.OrdinalIgnoreCase) || t == "0") { value = HudEventValue.FromBool(false); return true; }
                 return false;
             case HudEventType.Int:
-                if (!int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i)) return false;
+                if (!int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
+                {
+                    if (!NumberExpression.TryEvaluate(t, out var sum) || Math.Abs(sum) > int.MaxValue) return false;
+                    i = (int)Math.Round(sum);
+                }
                 value = HudEventValue.FromInt(i);
                 return true;
             case HudEventType.Uint:
@@ -37,6 +42,12 @@ public static class HudEventText
                     value = HudEventValue.FromUint(u);
                     return true;
                 }
+                // A sum of numbers; anything else is a name, sent as its hash.
+                if (NumberExpression.TryEvaluate(t, out var whole) && whole is >= 0 and <= uint.MaxValue)
+                {
+                    value = HudEventValue.FromUint((uint)Math.Round(whole));
+                    return true;
+                }
                 if (t.Length == 0) return false;
                 value = HudEventValue.FromName(t);
                 return true;
@@ -46,7 +57,11 @@ public static class HudEventText
                     value = HudEventValue.FromFloat(float.MaxValue);
                     return true;
                 }
-                if (!float.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out var f)) return false;
+                if (!float.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out var f))
+                {
+                    if (!NumberExpression.TryEvaluate(t, out var sum)) return false;
+                    f = (float)sum;
+                }
                 value = HudEventValue.FromFloat(f);
                 return true;
             case HudEventType.Color:
@@ -88,12 +103,19 @@ public static class HudEventText
         _ => value.ToString(),
     };
 
+    /// <summary>Numbers apart by commas (each may be a sum, as 1/3), or by spaces.</summary>
     private static float[]? Numbers(string text)
     {
-        var parts = text.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        var parts = text.Contains(',')
+            ? text.Split(',', StringSplitOptions.TrimEntries)
+            : text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var result = new float[parts.Length];
         for (var i = 0; i < parts.Length; i++)
-            if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out result[i])) return null;
+        {
+            if (float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out result[i])) continue;
+            if (!NumberExpression.TryEvaluate(parts[i], out var sum)) return null;
+            result[i] = (float)sum;
+        }
         return result;
     }
 }

@@ -23,7 +23,7 @@
                            FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </Border>
-        <TabControl x:Name="Tabs">
+        <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged">
             <TabItem Header="Properties">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel x:Name="Rows" Margin="10,4,10,12" />

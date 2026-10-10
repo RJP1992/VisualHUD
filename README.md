@@ -168,6 +168,16 @@ one's for the same key.
 - In the Properties panel, a colour is a swatch that opens a picker and shows the change as you
   pick; a mode, an alignment, a style, a font or an event is a list, which takes typing too; an
   on/off line is a switch. Up and Down step a number (Shift for ten times or 0.1, Ctrl for 0.001).
+- A number box works out sums: `5.12*2`, `128/4`, `(1920 - 64) / 2`. A number of pixels, as
+  `960px`, is put in the line's own unit, so a Viewport position can be typed in pixels. The
+  Events tab's value boxes take sums too.
+- **Units.** Choosing another unit for a `Position`, `Rect` or `BitmapRect` (Pixels, Screen,
+  Viewport, or Frame for a position) converts its numbers, so the element keeps its place and
+  size at the canvas's **Screen**. A line written without a unit shows the one the game reads it
+  in, greyed, to change the same way. **Edit > Convert units** does it for the selection and
+  everything in it, or a whole file, in one undo step: Viewport makes a HUD follow the
+  resolution. Choose the resolution the HUD was made for in **Screen** first. A VehicleSeating's
+  own `Position` is left as it is, as the game reads it as pixels whatever its unit.
 - The Properties panel's **Add** tab offers every key the game reads for the selected block, by
   the class that reads it (an element's own, its group base, every element's) and GameExt's,
   grouped and with a filter. A template such as `MeshInfo`, `Segment` or a Target template gets

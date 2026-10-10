@@ -12,10 +12,21 @@ public enum HudTokenKind
     LBrace,
     RBrace,
     Comma,
+    /// <summary>A <c>//</c> or <c>/* */</c> comment, its text as written, when the lexer keeps them.</summary>
+    Comment,
     EndOfFile,
 }
 
-public readonly record struct HudToken(HudTokenKind Kind, string Value, int Line, int Column);
+/// <summary>
+/// A token: a comment also carries the line it ends on. When the lexer keeps comments, every token
+/// carries <paramref name="Gap"/>, the spaces and tabs before it on its line, and whether nothing
+/// else comes before it on the line.
+/// </summary>
+public readonly record struct HudToken(HudTokenKind Kind, string Value, int Line, int Column, int EndLine = 0,
+    string Gap = "", bool StartsLine = false)
+{
+    public int LastLine => EndLine == 0 ? Line : EndLine;
+}
 
 public sealed class HudLexException(string message, int line, int column)
     : Exception($"{message} at line {line}, column {column}")
@@ -26,7 +37,8 @@ public sealed class HudLexException(string message, int line, int column)
 
 public static class HudLexer
 {
-    public static IReadOnlyList<HudToken> Tokenize(string source)
+    /// <summary>The tokens of a file; comments are skipped unless <paramref name="keepComments"/>.</summary>
+    public static IReadOnlyList<HudToken> Tokenize(string source, bool keepComments = false)
     {
         var tokens = new List<HudToken>(capacity: 1024);
         var line = 1;
@@ -43,12 +55,17 @@ public static class HudLexer
 
             if (c == '/' && i + 1 < len && source[i + 1] == '/')
             {
+                var start = i;
                 while (i < len && source[i] != '\n') i++;
+                if (keepComments)
+                    tokens.Add(Lead(new HudToken(HudTokenKind.Comment, source[start..i].TrimEnd('\r'), line, col, line), source, start));
+                col += i - start;
                 continue;
             }
             if (c == '/' && i + 1 < len && source[i + 1] == '*')
             {
                 var startLine = line; var startCol = col;
+                var start = i;
                 i += 2; col += 2;
                 while (i + 1 < len && !(source[i] == '*' && source[i + 1] == '/'))
                 {
@@ -57,16 +74,26 @@ public static class HudLexer
                 }
                 if (i + 1 >= len) throw new HudLexException("Unterminated block comment", startLine, startCol);
                 i += 2; col += 2;
+                if (keepComments)
+                    tokens.Add(Lead(new HudToken(HudTokenKind.Comment, source[start..i].Replace("\r\n", "\n"), startLine, startCol, line), source, start));
                 continue;
             }
 
-            switch (c)
+            HudTokenKind? punctuation = c switch
             {
-                case '(': tokens.Add(new HudToken(HudTokenKind.LParen, "(", line, col)); i++; col++; continue;
-                case ')': tokens.Add(new HudToken(HudTokenKind.RParen, ")", line, col)); i++; col++; continue;
-                case '{': tokens.Add(new HudToken(HudTokenKind.LBrace, "{", line, col)); i++; col++; continue;
-                case '}': tokens.Add(new HudToken(HudTokenKind.RBrace, "}", line, col)); i++; col++; continue;
-                case ',': tokens.Add(new HudToken(HudTokenKind.Comma, ",", line, col)); i++; col++; continue;
+                '(' => HudTokenKind.LParen,
+                ')' => HudTokenKind.RParen,
+                '{' => HudTokenKind.LBrace,
+                '}' => HudTokenKind.RBrace,
+                ',' => HudTokenKind.Comma,
+                _ => null,
+            };
+            if (punctuation is { } kind)
+            {
+                var token = new HudToken(kind, c.ToString(), line, col);
+                tokens.Add(keepComments ? Lead(token, source, i) : token);
+                i++; col++;
+                continue;
             }
 
             if (c == '"')
@@ -112,7 +139,8 @@ public static class HudLexer
                 var startLine = line; var startCol = col;
                 var start = i;
                 while (i < len && IsIdentPart(source[i])) { i++; col++; }
-                tokens.Add(new HudToken(HudTokenKind.Identifier, source[start..i], startLine, startCol));
+                var token = new HudToken(HudTokenKind.Identifier, source[start..i], startLine, startCol);
+                tokens.Add(keepComments ? Lead(token, source, start) : token);
                 continue;
             }
 
@@ -121,6 +149,14 @@ public static class HudLexer
 
         tokens.Add(new HudToken(HudTokenKind.EndOfFile, string.Empty, line, col));
         return tokens;
+    }
+
+    /// <summary>The token with the spaces and tabs before <paramref name="index"/>, and whether they start the line.</summary>
+    private static HudToken Lead(HudToken token, string source, int index)
+    {
+        var start = index;
+        while (start > 0 && source[start - 1] is ' ' or '\t') start--;
+        return token with { Gap = source[start..index], StartsLine = start == 0 || source[start - 1] is '\n' or '\r' };
     }
 
     private static bool IsDigit(char c) => c >= '0' && c <= '9';

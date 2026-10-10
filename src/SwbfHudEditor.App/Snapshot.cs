@@ -15,7 +15,7 @@ namespace SwbfHudEditor.App;
 /// <code>
 /// VisualHUD.exe --snapshot file.hud out.png [--add other.hud]... [--screen 1280x720] [--game gameext|vanilla]
 ///               [--snap on|off] [--viewport 1] [--background shot.png] [--no-placeholders] [--no-guides]
-///               [--preset onfoot] [--send event[=value]]... [--dump layout.txt]
+///               [--preset onfoot] [--send event[=value]]... [--dump layout.txt] [--text examples|long|keys]
 /// </code>
 /// <c>--add</c>, repeated, loads more files after the first, as the game loads a HUD's files: each laid
 /// out by its own <c>FileInfo</c>. The transform files beside them load first, as in the editor.
@@ -63,6 +63,7 @@ internal static class Snapshot
         var sends = new List<(string Name, string? Value)>();
         string? dump = null;
         string? preset = null;
+        var textPreview = TextPreview.Examples;
         var paths = new List<string> { hudPath };
         var assetFolders = new List<string>();
         for (var i = 0; i < args.Length; i++)
@@ -103,6 +104,15 @@ internal static class Snapshot
                 case "--add":
                     paths.Add(Path.GetFullPath(Next()));
                     break;
+                case "--text":
+                    textPreview = Next().ToLowerInvariant() switch
+                    {
+                        "long" => TextPreview.Long,
+                        "keys" => TextPreview.Keys,
+                        "examples" => TextPreview.Examples,
+                        _ => throw new ArgumentException("--text takes examples, long or keys"),
+                    };
+                    break;
                 case "--assets":
                     assetFolders.Add(Path.GetFullPath(Next()));
                     break;
@@ -120,6 +130,7 @@ internal static class Snapshot
         var canvas = new HudCanvas();
         canvas.Configure(target, screen, snap, viewport, placeholders, guides);
         canvas.LoadDocuments(docs, assets, MainWindow.TryLoadLocalization(assets));
+        canvas.TextPreview = textPreview;
         // The guides are the first file's: the files come after their transforms.
         canvas.ActiveDocument = docs[docs.Count - paths.Count];
         if (sends.Count > 0 || preset is not null)

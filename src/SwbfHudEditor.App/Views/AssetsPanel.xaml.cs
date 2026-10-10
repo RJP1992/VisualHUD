@@ -83,6 +83,7 @@ public partial class AssetsPanel : UserControl
         HudAssetKind.Texture => count == 1 ? "texture" : "textures",
         HudAssetKind.Mesh => count == 1 ? "mesh" : "meshes",
         HudAssetKind.Font => count == 1 ? "font" : "fonts",
+        HudAssetKind.String => count == 1 ? "string" : "strings",
         _ => "localization",
     };
 

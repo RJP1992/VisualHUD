@@ -8,7 +8,7 @@ namespace SwbfHudEditor.Core.Layout;
 /// them out; the document keeps them.
 /// </summary>
 /// <remarks>
-/// Kept whatever their value: <c>ZOrder</c> (a child's line moves it in front of its equals even at
+/// Kept whatever their value: a line with a comment before or after it, <c>ZOrder</c> (a child's line moves it in front of its equals even at
 /// the starting 128), every line of a key written more than once in a block (a later line replaces
 /// an earlier one), the lines that make the element (<c>BitmapRect</c>, <c>Bitmap</c>, <c>Mesh</c>,
 /// <c>Text</c>, <c>TextFont</c>), events, lines in a form other than the plain one, keys whose
@@ -20,7 +20,7 @@ namespace SwbfHudEditor.Core.Layout;
 public static class ElementDefaults
 {
     /// <summary>The document as text without the lines that restate a default. The document is not changed.</summary>
-    public static string WriteWithoutDefaults(HudDocument doc, string indent = "    ")
+    public static string WriteWithoutDefaults(HudDocument doc, string? indent = null)
     {
         var redundant = RedundantLines(doc);
         return HudWriter.Write(doc, indent, redundant.Contains);
@@ -57,7 +57,8 @@ public static class ElementDefaults
             .GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
         foreach (var line in scope.Children)
-            if (!line.HasBody && counts[line.Name] == 1 && isDefault(line)) into.Add(line);
+            // A line with a comment stays: the comment is about it.
+            if (!line.HasBody && counts[line.Name] == 1 && line.Trivia?.HasComments != true && isDefault(line)) into.Add(line);
     }
 
     /// <summary>Whether a line of an element of this kind sets only what its constructors set.</summary>

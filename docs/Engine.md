@@ -119,6 +119,39 @@ Then:
 - **Runtime HUD scale.** `HUD::Element::SetRuntimeScale` (P `005F5400`) rescales the axes
   of `Scalable(1)` elements and keeps their translation.
 
+## Text
+
+`SwbfHudEditor.Core/Layout/TextLayout.cs` ports the game's text layout; the font metrics come
+from the font's FontEdit `.fff` file (`BORK`, the glyph count, the cell height, then per glyph
+its character, advance, left, top, right and bottom, the fields of the munged `Glyph`).
+
+- **Line height** (`GetTextHeight`, P `008C62F0`): the font's cell height times `TextScale` y,
+  rounded, plus a leading no `.hud` line sets. 17 pixels for `gamefont_small`.
+- **Breaking** (`ClipString`, P `008C55B0`). Characters move by their rounded advance plus
+  `TextCharacterSpacing` (1 by default); a tab to the next stop, `TextTabSpacing` or eight spaces.
+  A line ends at a line break. With `TextBreak("Word")` and a box, a line that would pass the
+  box's right edge ends at its last run of spaces, or before the character if it has none.
+  `"No Reformat"` does not wrap but counts a run of spaces, tabs and line breaks as one space,
+  when breaking and aligning only: the draw still moves past every one. `TranslateString` takes
+  the first name a value starts with, so `"Word Reformat"` reads as `"Word"`: a file cannot ask
+  for both.
+- **Lines in the box** (`GetMaxLines`, P `008C5F90`): with a box height, as many lines as fit,
+  at least one; without, 80. Text past them is dropped, except with `Bottom` alignment, which
+  keeps the last lines, as a scrolling log would.
+- **Placing** (`WriteCache`, P `008C6A20`): the first line by the vertical alignment (Top 0,
+  Bottom and Center inside the box, Baseline the font's ascent above the origin), each line by
+  the horizontal one inside the box (with no box, Right ends at the origin and Center straddles
+  it). A printing character (one with pixels, `IsPrintingChar`, P `008C82F0`) that would pass the
+  box's right edge is not drawn, nor is the rest of its line: text is clipped, never squeezed.
+- **Strings.** A `Text` key the localization lacks is shown as the key itself, with a warning in
+  the log (`ElementText::ReadData`, P `0060C978`). A `{name}` in a string becomes the button
+  bound to that action (`FindReplaceMagicStrings_`).
+
+The preview draws each character where the layout places it, with the game font's widths when
+its `.fff` is found; the glyphs themselves are a system typeface at the font's capital height.
+Before events are simulated, a text element shows an example of what its events send (Text:
+Examples or Long in the toolbar) or the keys and event names (Keys).
+
 ## Several files
 
 A HUD is several `.hud` files: the stock `ingame.lvl` loads `hudtransforms` and the HUD files,
@@ -214,8 +247,8 @@ BorderedBox and MultilineText with all they hold.
   perspective factor (`Red3DModelElementLite::LocalToWorld`, P `008DECE0`;
   `GetDepthMultiplier`, P `008DEC60`), which brings it near the camera. The preview still
   sizes a mesh unit as 1/7 of the width, an estimate.
-- **Fonts.** Glyph sizes come from the game's font data; the preview uses a system font at
-  estimated heights.
+- **Glyph images.** Text is laid out with the game font's metrics, but drawn with a system
+  typeface: the `.fff` glyph images are not decoded yet.
 - **Map, Target, MultilineText, ObjectiveList, VehicleSeating, BorderedBox** draw from
   code the preview does not run; they show as outlines of their Rect.
 - **Time.** The simulation has no clock: fades (`FadeInTime`, `FadeHoldTime` and the rest) are

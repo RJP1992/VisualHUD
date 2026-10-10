@@ -50,6 +50,8 @@ public class HudRoundTripTests
         var written = HudWriter.Write(doc);
         var doc2 = HudParser.Parse(written);
         AssertSemanticEqual(doc, doc2);
+        // Byte for byte: comments, blank lines, spacing, indentation and line endings as they were.
+        Assert.Equal(src, written);
     }
 
     private static void AssertSemanticEqual(HudDocument a, HudDocument b)

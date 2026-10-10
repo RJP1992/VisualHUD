@@ -43,11 +43,13 @@ by its own `FileInfo`. The editor works on such a set:
   GameExt lays out; the guides and the layout line are for the selection's file.
 - Events and transforms reach every file. Each file's checkbox shows or hides its elements.
 - **Save** writes every file with unsaved changes, and only those; **Save file as** writes
-  the selection's file under a new name. A saved file loses its comments.
+  the selection's file under a new name. A saved file keeps its comments, blank lines,
+  spacing, indentation and line endings: only the lines you edited change.
 - Saving leaves out the lines that only restate the engine's defaults, such as `Alpha(1)`
   or `Rotation(0, 0, 0)`; the Properties panel shows them in grey italics. Lines the game
-  needs whatever their value stay: `ZOrder`, a key written twice in a block, and anything
-  whose default is not known. The list is in [docs/Engine.md](docs/Engine.md#defaults).
+  needs whatever their value stay: `ZOrder`, a key written twice in a block, anything whose
+  default is not known, and any line with a comment before or after it. The list is in
+  [docs/Engine.md](docs/Engine.md#defaults).
 
 ## Assets
 
@@ -70,11 +72,12 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
   - textures: `Bitmap` and `Mask` lines, and the textures of the models found;
   - meshes: `Mesh`, `MeshInfo`, and the transforms' `NameMesh` rows;
   - fonts: `TextFont`, a `.fff` file;
+  - strings: the `Text` keys, found in the localization or missing;
   - the localization file.
 - **Rescan** reads the folders again after files were added to them; the × removes an added
   folder.
 - Textures are `.tga` files and models `.msh` files, as the game's munge reads them; a `.png`
-  does not count. Fonts are checked only: text is still drawn with a system font.
+  does not count. A font gives text its widths; its glyph images are not read yet.
 
 ## The canvas
 
@@ -94,6 +97,24 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
 
 Dragging an element changes its last `Position` line, in that line's own mode, through
 the inverse of the matrix the game draws it with.
+
+## Text
+
+Text is laid out as the game lays it out: lines break, wrap and clip in their `TextBox` with
+the widths of the game font, read from its `.fff` file, and the box is outlined with the
+guides. The characters themselves are drawn with a system typeface until the font images are
+read.
+
+Before any event is simulated, **Text** in the toolbar picks what text elements show:
+
+- **Examples**: the strings of their `Text` keys, with a button in brackets for a `{name}`, and
+  for event-driven text what the game would typically send (a weapon name, ammo, a timer as
+  `2:05`), numbers printed with the element's own format.
+- **Long**: long names, large numbers and paragraphs, to see how a box holds them.
+- **Keys**: the keys and event names the file names.
+
+A key the localization lacks shows as the key, as it would in game, and is listed under
+**Assets** as a missing string.
 
 ## Events
 
@@ -127,7 +148,7 @@ editor's saved ones),
 `--screen WxH`, `--game gameext|vanilla`, `--snap on|off`, `--viewport n`,
 `--background image.png` (draw over a screenshot of the same size), `--no-placeholders`,
 `--no-guides`, `--preset onfoot` and `--send event[=value]` (repeatable, in order) to simulate
-events, and `--dump layout.txt` to list every element as laid out. Errors are written to
+events, `--text examples|long|keys`, and `--dump layout.txt` to list every element as laid out. Errors are written to
 `out.png.error.txt`.
 
 ```bash

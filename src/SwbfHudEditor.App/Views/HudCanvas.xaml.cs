@@ -37,6 +37,8 @@ public partial class HudCanvas : UserControl
     private IReadOnlyList<HudDocument> _documents = Array.Empty<HudDocument>();
     private HudDocument? _activeDocument;
     private TextureCache? _textures;
+    private TextFonts _fonts = new(null);
+    private TextPreview _textPreview = TextPreview.Examples;
     private MeshRenderer? _meshRenderer;
     private LocalizationTable? _localization;
     private HudTransformGraph? _graph;
@@ -99,6 +101,7 @@ public partial class HudCanvas : UserControl
         _documents = docs;
         if (_activeDocument is not null && !docs.Contains(_activeDocument)) _activeDocument = null;
         _textures = assets is not null ? new TextureCache(assets) : null;
+        _fonts = new TextFonts(assets);
         _meshRenderer = _textures is not null && assets is not null ? new MeshRenderer(assets, _textures) : null;
         if (_meshRenderer is not null) _meshRenderer.MeshUnitToHudPixels = MeshFactorSlider.Value;
         _localization = localization;
@@ -115,6 +118,18 @@ public partial class HudCanvas : UserControl
             if (ReferenceEquals(_activeDocument, value)) return;
             _activeDocument = value;
             Render();
+        }
+    }
+
+    /// <summary>What text elements show before their events: example values, long ones, or the keys.</summary>
+    public TextPreview TextPreview
+    {
+        get => _textPreview;
+        set
+        {
+            if (_textPreview == value) return;
+            // The box's handler takes it from here.
+            TextPreviewCombo.SelectedIndex = (int)value;
         }
     }
 
@@ -188,7 +203,7 @@ public partial class HudCanvas : UserControl
             var what = new List<string>();
             if (e.Quad is { } q) what.Add($"quad {q.Width:0}x{q.Height:0}" + (e.Texture is { } t ? $" {t}" : " (no texture)"));
             if (e.Kind == ElementKind.Model3D) what.Add($"mesh {e.Mesh ?? "(none)"}{(e.Mesh is { } m && _meshRenderer?.Get(m) is null ? " (not found)" : "")}");
-            if (e.Kind == ElementKind.Text) what.Add($"text \"{e.Text ?? TextContent(e.Spec)}\"");
+            if (e.Kind == ElementKind.Text) what.Add($"text \"{ShownText(e)}\"");
             if (ElementKinds.IsBar(e.Kind)) what.Add($"bar {e.BarFraction:0.##}");
             if (e.Role != PieceRole.None) what.Add($"{e.Role} slid {e.Slide:0.#}");
             what.Add(_visuals.ContainsKey(e.Block) ? "drawn" : "not drawn");
@@ -417,82 +432,48 @@ public partial class HudCanvas : UserControl
         return visual;
     }
 
+    /// <summary>
+    /// A text element laid out as the game lays it out (SwbfHudEditor.Core/Layout/TextLayout.cs): lines
+    /// broken and clipped in its box with its font's widths, each character placed. The box is outlined
+    /// with the guides.
+    /// </summary>
     private FrameworkElement? TextVisual(LaidOutElement e)
     {
         var spec = e.Spec;
         // While simulating, a text that shows only what its events send stays empty until one does.
         if (e.Runtime is not null && e.Text is null && spec.TextKey is null) return null;
-        var content = e.Text ?? TextContent(spec);
-        var (fontSize, family) = ResolveFont(spec.Font);
-        var tb = new TextBlock
+        if (ShownText(e) is not { } content)
+            return ShowPlaceholders ? MarkerVisual(e.ToScreen, LabelFor(e) + "  (no text)") : null;
+
+        var font = _fonts.For(spec.Font);
+        var layout = TextLayout.Lay(content, font.Metrics, new TextLayoutOptions
         {
-            Text = content,
-            FontSize = fontSize,
-            FontFamily = family,
-            Foreground = new SolidColorBrush(ToColor(e.DrawColor)),
+            BoxWidth = e.TextBoxWidth,
+            BoxHeight = e.TextBoxHeight,
+            ScaleX = spec.TextScale.X,
+            ScaleY = spec.TextScale.Y,
+            Spacing = spec.TextSpacing,
+            TabSpacing = spec.TextTabSpacing,
+            HAlign = spec.TextHAlign,
+            VAlign = spec.TextVAlign,
+            Break = spec.TextBreak,
+        });
+        var box = GuidesBox.IsChecked == true && (e.TextBoxWidth > 0 || e.TextBoxHeight > 0)
+            ? new Rect(0, 0, e.TextBoxWidth, e.TextBoxHeight)
+            : (Rect?)null;
+        var shadow = spec.TextStyle is { } style && style.StartsWith("Shadow", StringComparison.OrdinalIgnoreCase);
+        var brush = new SolidColorBrush(ToColor(e.DrawColor));
+        brush.Freeze();
+        return new TextGlyphsVisual(layout, font, brush, shadow, box)
+        {
             Opacity = Math.Clamp(e.DrawAlpha, 0.0, 1.0),
-            TextWrapping = TextWrapping.NoWrap,
+            RenderTransform = new MatrixTransform(ToWpf(e.ToScreen)),
         };
-        if (spec.TextStyle is { } style && style.StartsWith("Shadow", StringComparison.OrdinalIgnoreCase))
-            tb.Effect = new System.Windows.Media.Effects.DropShadowEffect { ShadowDepth = 1, BlurRadius = 0, Color = Colors.Black, Opacity = 0.9 };
-        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-
-        // RedTextElement::WriteCache: the box starts at the element's origin and each line sits in it by
-        // its alignment; with no box, Right ends at the origin and Center straddles it.
-        double sx = spec.TextScale.X, sy = spec.TextScale.Y;
-        var lineW = tb.DesiredSize.Width * sx;
-        var lineH = tb.DesiredSize.Height * sy;
-        double boxW = e.TextBoxWidth, boxH = e.TextBoxHeight;
-        var x0 = spec.TextHAlign switch
-        {
-            TextHAlign.Right => boxW - lineW,
-            TextHAlign.Center => (boxW - lineW) / 2,
-            _ => 0.0,
-        };
-        var y0 = spec.TextVAlign switch
-        {
-            TextVAlign.Bottom => boxH - lineH,
-            TextVAlign.Center => (boxH - lineH) / 2,
-            TextVAlign.Baseline => -fontSize * 0.8 * sy,
-            _ => 0.0,
-        };
-        var local = Matrix4x4.CreateScale((float)sx, (float)sy, 1f) * Matrix4x4.CreateTranslation((float)x0, (float)y0, 0f);
-        tb.RenderTransform = new MatrixTransform(ToWpf(local * e.ToScreen));
-        return tb;
     }
 
-    private string TextContent(ElementSpec spec)
-    {
-        if (spec.TextKey is { } key) return _localization?.TryGet(key) ?? key;
-        if (spec.EventText is { } text) return "{" + LastSegment(text) + "}";
-        if (spec.EventNumber is { } number) return "{" + LastSegment(number) + "}";
-        return $"[{spec.Name ?? "text"}]";
-    }
-
-    private static string LastSegment(string path)
-    {
-        var dot = path.LastIndexOf('.');
-        return dot < 0 ? path : path[(dot + 1)..];
-    }
-
-    /// <summary>
-    /// Approximate pixel heights for the game's fonts. The real glyph metrics live in the game's font
-    /// data, which the preview does not read yet.
-    /// </summary>
-    private static (double Size, FontFamily Family) ResolveFont(string? fontName)
-    {
-        var size = fontName?.ToLowerInvariant() switch
-        {
-            "gamefont_super_tiny" => 8.0,
-            "gamefont_tiny" => 10.0,
-            "gamefont_small" => 13.0,
-            "gamefont_medium" => 16.0,
-            "gamefont_big" => 20.0,
-            "gamefont_large" => 22.0,
-            _ => 12.0,
-        };
-        return (size, new FontFamily("Segoe UI, Arial, sans-serif"));
-    }
+    /// <summary>What a text element shows: what its events sent, else an example of it.</summary>
+    private string? ShownText(LaidOutElement e) =>
+        e.Text ?? HudTextExamples.For(e.Spec, _textPreview, key => _localization?.TryGet(key));
 
     private FrameworkElement? ModelVisual(LaidOutElement e)
     {
@@ -1044,6 +1025,13 @@ public partial class HudCanvas : UserControl
     }
 
     private void Option_Changed(object sender, RoutedEventArgs e) => Render();
+
+    private void TextPreviewCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready) return;
+        _textPreview = (TextPreview)Math.Max(0, TextPreviewCombo.SelectedIndex);
+        Render();
+    }
 
     private void Slider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
     {

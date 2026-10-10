@@ -53,6 +53,14 @@
                               Checked="Option_Changed" Unchecked="Option_Changed"
                               ToolTip="While simulating events, draw the elements their events have not enabled faintly, so they can still be picked." />
 
+                    <TextBlock Text="Text:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="TextPreviewCombo" SelectedIndex="0" Width="90" Margin="0,0,16,0" SelectionChanged="TextPreviewCombo_SelectionChanged"
+                              ToolTip="What text elements show before their events are simulated. Examples: what the game would typically put there, and the strings of the keys. Long: long names, large numbers and paragraphs, to see how a box holds them. Keys: the keys and event names the file names.">
+                        <ComboBoxItem Content="Examples" />
+                        <ComboBoxItem Content="Long" />
+                        <ComboBoxItem Content="Keys" />
+                    </ComboBox>
+
                     <TextBlock Text="HUD scale:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <Slider x:Name="HudScaleSlider" Minimum="0.5" Maximum="1.5" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="True"
                             Width="90" VerticalAlignment="Center" ValueChanged="Slider_Changed"

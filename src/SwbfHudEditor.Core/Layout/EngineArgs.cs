@@ -44,6 +44,7 @@ public static class EngineArgs
     public static readonly string[] VAlignNames = { "Top", "Center", "Bottom" };
     public static readonly string[] TextHAlignNames = { "Left", "Right", "Center" };
     public static readonly string[] TextVAlignNames = { "Top", "Bottom", "Center", "Baseline" };
+    public static readonly string[] TextBreakNames = { "None", "Word", "No Reformat", "Word Reformat" };
 
     /// <summary>
     /// <c>HUD::TranslateString</c> (Phantom <c>00618150</c>): the index of the first of the first

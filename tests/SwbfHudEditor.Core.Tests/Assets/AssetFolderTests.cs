@@ -114,5 +114,12 @@ public sealed class AssetFolderTests : IDisposable
         Assert.DoesNotContain(assets, a => a.Name is "b" or "m" or "t" or "w");
         Assert.Equal(new[] { "Bitmap \"m\" (my.hud)" }, assets.Single(a => a.Name == "hud_missing").UsedBy);
         Assert.Equal(new[] { "TransformNameMesh \"player1weapon1\" (my.hud)" }, assets.Single(a => a.Name == "hud_rifle").UsedBy);
+        // Without a localization to look in, Text keys are not listed one by one.
+        Assert.DoesNotContain(assets, a => a.Kind == HudAssetKind.String);
+
+        // With one, each key is found or missing: the game shows a missing key as itself.
+        Touch(@"mod\Common\Localize\english.cfg");
+        var withStrings = HudAssets.Check(new[] { doc }, AssetResolver.ForHudFile(hudPath), hasString: key => key != "level.key");
+        Assert.Null(withStrings.Single(a => a.Kind == HudAssetKind.String && a.Name == "level.key").Path);
     }
 }

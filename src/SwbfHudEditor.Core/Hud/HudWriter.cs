@@ -2,64 +2,77 @@ using System.Text;
 
 namespace SwbfHudEditor.Core.Hud;
 
+/// <summary>
+/// Writes a document as <c>.hud</c> text: one line per statement, a body's braces on lines of their
+/// own, and the comments, blank lines, indentation and line endings its file was read with.
+/// </summary>
 public static class HudWriter
 {
-    /// <summary>The document as text; lines <paramref name="omit"/> picks are left out, the document is not changed.</summary>
-    public static string Write(HudDocument doc, string indent = "    ", Func<HudBlock, bool>? omit = null)
+    /// <summary>
+    /// The document as text, indented with <paramref name="indent"/> or the file's own; lines
+    /// <paramref name="omit"/> picks are left out, with their comments. The document is not changed.
+    /// </summary>
+    public static string Write(HudDocument doc, string? indent = null, Func<HudBlock, bool>? omit = null)
     {
-        var sb = new StringBuilder();
-        for (var i = 0; i < doc.TopLevel.Count; i++)
-        {
-            WriteBlock(sb, doc.TopLevel[i], depth: 0, indent, omit);
-            if (i < doc.TopLevel.Count - 1) sb.Append('\n');
-        }
-        return sb.ToString();
+        var writer = new Writer(indent ?? doc.Indent, doc.LineEnding, omit);
+        foreach (var block in doc.TopLevel) writer.Block(block, depth: 0);
+        writer.Lines(doc.Closing);
+        return writer.Finish(doc.FinalLineEnding);
     }
 
-    private static void WriteBlock(StringBuilder sb, HudBlock block, int depth, string indent, Func<HudBlock, bool>? omit)
+    private sealed class Writer(string indent, string newline, Func<HudBlock, bool>? omit)
     {
-        AppendIndent(sb, depth, indent);
-        sb.Append(block.Name).Append('(');
+        private readonly StringBuilder _sb = new();
+
+        public void Block(HudBlock block, int depth)
+        {
+            var trivia = block.Trivia;
+            Lines(trivia?.Before);
+            var header = Header(block);
+            // As written, while the line is as it was read.
+            if (trivia?.RawHeader is { } raw && trivia.HeaderAsRead == header) header = raw;
+            Line(trivia?.Indent ?? Depth(depth), header + trivia?.After);
+            if (!block.HasBody) return;
+            Line(trivia?.OpenIndent ?? Depth(depth), "{" + trivia?.AfterOpen);
+            foreach (var child in block.Children)
+                if (omit?.Invoke(child) != true) Block(child, depth + 1);
+            Lines(trivia?.BeforeClose);
+            Line(trivia?.CloseIndent ?? Depth(depth), "}" + trivia?.AfterClose);
+        }
+
+        /// <summary>Whole lines kept from the file, written as they were.</summary>
+        public void Lines(List<string>? lines)
+        {
+            if (lines is null) return;
+            foreach (var line in lines) Line(string.Empty, line);
+        }
+
+        private string Depth(int depth) => depth == 0 ? string.Empty : string.Concat(Enumerable.Repeat(indent, depth));
+
+        private void Line(string lead, string text)
+        {
+            // A block comment's own line breaks follow the file's.
+            _sb.Append(lead).Append(newline == "\n" ? text : text.Replace("\n", newline)).Append(newline);
+        }
+
+        public string Finish(string finalLineEnding)
+        {
+            if (_sb.Length >= newline.Length) _sb.Length -= newline.Length;
+            return _sb.Append(finalLineEnding).ToString();
+        }
+    }
+
+    /// <summary>A block's name and arguments as the writer puts them: <c>Name("text", 1, 2.5)</c>.</summary>
+    public static string Header(HudBlock block)
+    {
+        var sb = new StringBuilder(block.Name).Append('(');
         for (var i = 0; i < block.Arguments.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            WriteArgument(sb, block.Arguments[i]);
+            var arg = block.Arguments[i];
+            if (arg.Kind == HudArgKind.String) sb.Append('"').Append(arg.Raw).Append('"');
+            else sb.Append(arg.Raw);
         }
-        sb.Append(')');
-
-        if (block.HasBody)
-        {
-            sb.Append('\n');
-            AppendIndent(sb, depth, indent);
-            sb.Append("{\n");
-            foreach (var child in block.Children)
-            {
-                if (omit?.Invoke(child) == true) continue;
-                WriteBlock(sb, child, depth + 1, indent, omit);
-                sb.Append('\n');
-            }
-            AppendIndent(sb, depth, indent);
-            sb.Append('}');
-        }
-    }
-
-    private static void WriteArgument(StringBuilder sb, HudArgument arg)
-    {
-        switch (arg.Kind)
-        {
-            case HudArgKind.String:
-                sb.Append('"').Append(arg.Raw).Append('"');
-                break;
-            case HudArgKind.Integer:
-            case HudArgKind.Float:
-            case HudArgKind.Identifier:
-                sb.Append(arg.Raw);
-                break;
-        }
-    }
-
-    private static void AppendIndent(StringBuilder sb, int depth, string indent)
-    {
-        for (var i = 0; i < depth; i++) sb.Append(indent);
+        return sb.Append(')').ToString();
     }
 }

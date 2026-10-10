@@ -168,6 +168,15 @@ public sealed class ElementSpec
     public TextVAlign TextVAlign { get; set; }
     public string? TextStyle { get; set; }
 
+    /// <summary><c>TextBreak</c>: how lines wrap in the box (<c>RedTextElement::SetTextBreak</c>).</summary>
+    public TextBreak TextBreak { get; set; }
+
+    /// <summary><c>TextCharacterSpacing</c>, 1 from <c>RedTextElement</c>'s constructor.</summary>
+    public int TextSpacing { get; set; } = 1;
+
+    /// <summary><c>TextTabSpacing</c>; 0 for eight spaces.</summary>
+    public int TextTabSpacing { get; set; }
+
     /// <summary>How <c>EventNumber</c> prints (<c>ElementText::EventNumber</c>, P <c>0060BE50</c>).</summary>
     public string? IntegerFormat { get; set; }
     public string? FloatFormat { get; set; }
@@ -473,6 +482,16 @@ public static class ElementReader
                 break;
             case "TextStyle" when n >= 1:
                 s.TextStyle = EngineArgs.String(line.Arguments[0]);
+                break;
+            case "TextBreak" when n >= 1:
+                // A name that is not one of the four leaves the setting as it was.
+                s.TextBreak = (TextBreak)EngineArgs.NameAt(line, 0, EngineArgs.TextBreakNames, (int)s.TextBreak);
+                break;
+            case "TextCharacterSpacing" when n >= 1:
+                s.TextSpacing = (int)EngineArgs.FloatAt(line, 0);
+                break;
+            case "TextTabSpacing" when n >= 1:
+                s.TextTabSpacing = (int)EngineArgs.FloatAt(line, 0);
                 break;
             case "IntegerFormat" when n >= 1:
                 s.IntegerFormat = EngineArgs.String(line.Arguments[0]);

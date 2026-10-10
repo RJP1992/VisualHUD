@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _scanning = new(HudFileSet.PathComparer);
     private readonly Dictionary<string, IReadOnlyList<string>> _meshTextures = new(StringComparer.OrdinalIgnoreCase);
     private AssetResolver? _assets;
+    private LocalizationTable? _localization;
     private bool _assetListStale = true;
 
     public MainWindow()
@@ -333,10 +334,10 @@ public partial class MainWindow : Window
     private LocalizationTable? LoadAssets()
     {
         _assets = ResolverFor(UserFiles.Select(f => f.FilePath).OfType<string>(), ReadAssetFolders());
-        var localization = TryLoadLocalization(_assets);
-        Canvas.LoadDocuments(Documents, _assets, localization);
+        _localization = TryLoadLocalization(_assets);
+        Canvas.LoadDocuments(Documents, _assets, _localization);
         RefreshAssetList();
-        return localization;
+        return _localization;
     }
 
     /// <summary>The asset folders read so far, in search order.</summary>
@@ -376,7 +377,8 @@ public partial class MainWindow : Window
         _assetListStale = true;
         if (!AssetsTab.IsSelected) return;
         _assetListStale = false;
-        AssetsList.ShowAssets(_files.Count == 0 || _assets is null ? null : HudAssets.Check(Documents, _assets, _meshTextures));
+        var strings = _localization is { } table ? key => table.TryGet(key) is not null : (Func<string, bool>?)null;
+        AssetsList.ShowAssets(_files.Count == 0 || _assets is null ? null : HudAssets.Check(Documents, _assets, _meshTextures, strings));
     }
 
     private void LeftTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)

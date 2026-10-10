@@ -9,6 +9,8 @@ public enum HudAssetKind
     Texture,
     Mesh,
     Font,
+    /// <summary>A <c>Text</c> key; the game shows the key itself when the localization lacks it.</summary>
+    String,
     Localization,
 }
 
@@ -27,10 +29,11 @@ public static class HudAssets
     /// (<c>TextFont</c>) and, when a <c>Text</c> line names a string, the English localization, with
     /// the path <paramref name="assets"/> finds for it. Events that name a texture or model at run
     /// time are not counted: their names come from the game. <paramref name="meshTextures"/> keeps
-    /// each model file's texture names between checks.
+    /// each model file's texture names between checks. With <paramref name="hasString"/>, the lookup
+    /// of the localization that was loaded, each <c>Text</c> key is listed too, found or missing.
     /// </summary>
     public static IReadOnlyList<HudAsset> Check(IReadOnlyList<HudDocument> documents, AssetResolver assets,
-        IDictionary<string, IReadOnlyList<string>>? meshTextures = null)
+        IDictionary<string, IReadOnlyList<string>>? meshTextures = null, Func<string, bool>? hasString = null)
     {
         var uses = new Dictionary<(HudAssetKind Kind, string Name), List<string>>(new KeyComparer());
         void Use(HudAssetKind kind, string? name, string by)
@@ -62,10 +65,16 @@ public static class HudAssets
                 Use(HudAssetKind.Texture, texture.EndsWith(".tga", StringComparison.OrdinalIgnoreCase) ? texture[..^4] : texture, $"model {mesh}");
         }
 
-        var found = uses.Select(u => new HudAsset(u.Key.Kind, u.Key.Name, assets.Find(u.Key.Kind, u.Key.Name), u.Value)).ToList();
+        var localization = assets.FindLocalizationCfg("english");
+        var found = uses
+            .Where(u => u.Key.Kind != HudAssetKind.String || hasString is not null)
+            .Select(u => new HudAsset(u.Key.Kind, u.Key.Name,
+                u.Key.Kind == HudAssetKind.String ? (hasString!(u.Key.Name) ? localization : null) : assets.Find(u.Key.Kind, u.Key.Name),
+                u.Value))
+            .ToList();
 
         if (strings > 0)
-            found.Add(new HudAsset(HudAssetKind.Localization, "english", assets.FindLocalizationCfg("english"),
+            found.Add(new HudAsset(HudAssetKind.Localization, "english", localization,
                 new[] { $"{strings} Text line{(strings == 1 ? "" : "s")}" }));
 
         return found.OrderBy(a => a.Kind).ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToList();
@@ -100,7 +109,8 @@ public static class HudAssets
                 case "TextFont":
                     use(HudAssetKind.Font, StringAt(child, 0), owner);
                     break;
-                case "Text" when StringAt(child, 0) is not null:
+                case "Text" when StringAt(child, 0) is { } key:
+                    use(HudAssetKind.String, key, owner);
                     strings++;
                     break;
             }

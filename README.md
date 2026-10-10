@@ -138,7 +138,7 @@ one's for the same key.
   **On top** of it, at the slider's opacity. **Wipe** draws it over the HUD left of a divider
   you drag across the screen, to check an in-game screenshot edge for edge. It is remembered
   between sessions and never saved into a `.hud` file, so a HUD needs no reference element of
-  its own.
+  its own. The guides' lines are drawn over it, wherever it is.
 - The arrow keys move the selection by a screen pixel (Shift: ten) once the canvas has been
   clicked, through each element's last `Position` line in its own unit; a run of them undoes as
   one step. The line above the canvas shows where the mouse is, in screen pixels and in shares of

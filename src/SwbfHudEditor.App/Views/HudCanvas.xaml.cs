@@ -532,6 +532,7 @@ public partial class HudCanvas : UserControl
         LayoutInfoText.ToolTip = withElements.Count > 1
             ? string.Join("\n", withElements.Select(f => $"{FileName(f.Document)}: {Describe(_layout.Options, f.Layout)}"))
             : null;
+        _guideLines.Clear();
         if (GuidesBox.IsChecked == true) DrawGuides(_layout.Options.Screen, described.Layout);
 
         var showHidden = ShowHiddenBox.IsChecked == true;
@@ -986,6 +987,17 @@ public partial class HudCanvas : UserControl
 
     // ---- Guides ---------------------------------------------------------------------------------------
 
+    // The layers the canvas draws in, bottom to top: a reference image under the HUD; the guides' bands, and
+    // their lines unless an image covers the HUD; the HUD; a reference image on top of it (or wiped across
+    // it); the guides' lines over that image; then the selection, the snap lines and the wipe's handle.
+    internal const int ReferenceUnderLayer = int.MinValue + 1;
+    internal const int GuideUnderLayer = int.MinValue + 2;
+    internal const int ReferenceOverLayer = int.MaxValue - 3;
+    internal const int GuideOverLayer = int.MaxValue - 2;
+
+    /// <summary>A reference image drawn over the HUD, on top or wiped across it, so the guides' lines go over it too.</summary>
+    private bool ReferenceCovers => _referenceImage is not null && (ReferenceOnTopBox.IsChecked == true || ReferenceWipeBox.IsChecked == true);
+
     /// <summary>One file's guides: GameExt's thirds for a file laid out on its ratio, else the stock band.</summary>
     private void DrawGuides(HudScreen s, HudFileLayout file)
     {
@@ -1043,7 +1055,7 @@ public partial class HudCanvas : UserControl
             IsHitTestVisible = false,
         };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
-        Panel.SetZIndex(image, wipe || ReferenceOnTopBox.IsChecked == true ? int.MaxValue - 1 : int.MinValue + 1);
+        Panel.SetZIndex(image, wipe || ReferenceOnTopBox.IsChecked == true ? ReferenceOverLayer : ReferenceUnderLayer);
         CanvasSurface.Children.Add(image);
         _referenceImage = image;
         if (!wipe) return;
@@ -1109,16 +1121,22 @@ public partial class HudCanvas : UserControl
     {
         var line = new Line { X1 = x0, Y1 = y0, X2 = x1, Y2 = y1, Stroke = brush, StrokeThickness = 1, IsHitTestVisible = false };
         if (dashed) line.StrokeDashArray = new DoubleCollection { 6, 4 };
-        Panel.SetZIndex(line, int.MinValue);
+        Panel.SetZIndex(line, ReferenceCovers ? GuideOverLayer : GuideUnderLayer);
         CanvasSurface.Children.Add(line);
+        _guideLines.Add(line);
     }
+
+    // The guides' lines as last drawn: the tests read their layer.
+    private readonly List<Line> _guideLines = new();
+    internal IReadOnlyList<Line> GuideLines => _guideLines;
 
     private void AddRect(double x, double y, double w, double h, Brush brush)
     {
         var rect = new Rectangle { Width = Math.Max(0, w), Height = Math.Max(0, h), Fill = brush, IsHitTestVisible = false };
         Canvas.SetLeft(rect, x);
         Canvas.SetTop(rect, y);
-        Panel.SetZIndex(rect, int.MinValue);
+        // The bands stay under an image laid over the HUD: they would tint it.
+        Panel.SetZIndex(rect, GuideUnderLayer);
         CanvasSurface.Children.Add(rect);
     }
 

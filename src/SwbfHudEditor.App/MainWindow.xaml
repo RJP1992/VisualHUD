@@ -162,6 +162,8 @@
                 <MenuItem Header="_Copy" Command="{x:Static ApplicationCommands.Copy}" InputGestureText="Ctrl+C" />
                 <MenuItem Header="_Paste" Command="{x:Static ApplicationCommands.Paste}" InputGestureText="Ctrl+V" />
                 <MenuItem Header="D_uplicate" Command="{x:Static local:MainWindow.DuplicateCommand}" InputGestureText="Ctrl+D" />
+                <MenuItem Header="Re_peat..." Command="{x:Static local:MainWindow.RepeatCommand}" InputGestureText="Ctrl+Shift+D"
+                          ToolTip="Copies of the selection in a row, each a step further on the screen than the last." />
                 <Separator />
                 <MenuItem x:Name="EditInsertInside" Header="_Insert inside" ToolTipService.ShowOnDisabled="True" />
                 <MenuItem x:Name="EditInsertAfter" Header="Insert _after" ToolTipService.ShowOnDisabled="True" />
@@ -324,6 +326,7 @@
                                     <MenuItem Header="Copy" Command="{x:Static ApplicationCommands.Copy}" InputGestureText="Ctrl+C" />
                                     <MenuItem Header="Paste" Command="{x:Static ApplicationCommands.Paste}" InputGestureText="Ctrl+V" />
                                     <MenuItem Header="Duplicate" Command="{x:Static local:MainWindow.DuplicateCommand}" InputGestureText="Ctrl+D" />
+                                    <MenuItem Header="Repeat..." Command="{x:Static local:MainWindow.RepeatCommand}" InputGestureText="Ctrl+Shift+D" />
                                     <Separator />
                                     <MenuItem x:Name="TreeRename" Header="Rename" Click="Rename_Click" InputGestureText="F2"
                                               ToolTipService.ShowOnDisabled="True" />

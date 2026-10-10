@@ -22,6 +22,7 @@ public partial class MainWindow
         BuildArrangeMenu(TreeArrange.Items);
         var canvasMenu = new ContextMenu();
         BuildStructureMenu(canvasMenu.Items);
+        canvasMenu.Items.Add(new MenuItem { Header = "Re_peat...", Command = RepeatCommand, InputGestureText = "Ctrl+Shift+D" });
         canvasMenu.Items.Add(new Separator());
         BuildArrangeMenu(canvasMenu.Items);
         Canvas.ContextMenu = canvasMenu;

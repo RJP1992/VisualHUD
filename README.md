@@ -199,6 +199,9 @@ one's for the same key.
   line it has once replaced. **Duplicate** (Ctrl+D) copies the selection right after itself.
   Copies get names of their own (`name_1`, `name_2`), elements and transforms alike, and so do
   the events an `EventOutput` sends; templates keep theirs.
+- **Repeat** (Ctrl+Shift+D) makes copies of the selection in a row, each a step further on the
+  screen than the last (the step in pixels, across and down, starting as wide as the selection),
+  named as Duplicate names copies; one undo step.
 - **Move up** and **Move down** (Alt+Up, Alt+Down) move the selection among its neighbours.
   Dragging rows in the tree moves them before, after or into another row, between files too;
   the marker shows where they will go, and a row that cannot go there is refused with the reason

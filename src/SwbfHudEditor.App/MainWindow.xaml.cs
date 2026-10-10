@@ -208,7 +208,7 @@ public partial class MainWindow : Window
         if (!ConfirmDiscard("reloading")) return;
 
         // Our own exe + the files as cli arguments. Window_Loaded opens every file it is given, in order.
-        var exePath = Environment.ProcessPath ?? System.Reflection.Assembly.GetEntryAssembly()?.Location;
+        var exePath = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exePath))
         {
             MessageBox.Show(this, "Could not determine the editor's exe path — can't restart.",

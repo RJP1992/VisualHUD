@@ -16,6 +16,9 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>VisualHUD</AssemblyName>
     <ApplicationTitle>VisualHUD</ApplicationTitle>
+    <Version>1.0.0</Version>
+    <Product>VisualHUD</Product>
+    <Description>A Star Wars Battlefront II (2005) .hud editor that draws the HUD as the game does.</Description>
   </PropertyGroup>
 
 </Project>

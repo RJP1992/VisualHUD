@@ -1,6 +1,8 @@
 # Build output
 [Bb]in/
 [Oo]bj/
+# The release tools\publish.bat builds
+dist/
 *.user
 .vs/
 

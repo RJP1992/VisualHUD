@@ -11,7 +11,10 @@ bar fills, segmented rings, draw order and rounding. How each rule was read is i
 
 ## Build and run
 
-Needs the .NET 8 SDK (or newer) on Windows.
+The release is one file, `VisualHUD.exe`, that runs on 64-bit Windows 10 or 11 with nothing
+else installed. To build it, run `tools\publish.bat`; it writes `dist\VisualHUD.exe`.
+
+To work on the editor you need the .NET 8 SDK (or newer) on Windows.
 
 ```bash
 dotnet build SwbfHudEditor.sln

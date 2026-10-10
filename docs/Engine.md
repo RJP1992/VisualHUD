@@ -142,9 +142,14 @@ Then:
 
 ## Text
 
-`SwbfHudEditor.Core/Layout/TextLayout.cs` ports the game's text layout; the font metrics come
-from the font's FontEdit `.fff` file (`BORK`, the glyph count, the cell height, then per glyph
-its character, advance, left, top, right and bottom, the fields of the munged `Glyph`).
+`SwbfHudEditor.Core/Layout/TextLayout.cs` ports the game's text layout; the font comes from its
+FontEdit `.fff` file (`SwbfHudEditor.Core/Assets/FffFont.cs`): `BORK`, the glyph count (u16), the
+cell height (u8) and two bytes always 0; per glyph its character (u16), advance, left, top, right
+and bottom, the fields of the munged `Glyph`; then each glyph's image in that order, its width and
+height (u8 each, the ink box's) and a byte of coverage a pixel, rows top to bottom, to the end of
+the file. The layout and the coverage were read from FontEdit and FontMunge and checked against
+FontMunge's textures: FontMunge packs the coverage into four bits of alpha (the byte divided by
+17), so the faintest level a file has, 16, draws as nothing in game.
 
 - **Line height** (`GetTextHeight`, P `008C62F0`): the font's cell height times `TextScale` y,
   rounded, plus a leading no `.hud` line sets. 17 pixels for `gamefont_small`.
@@ -168,8 +173,9 @@ its character, advance, left, top, right and bottom, the fields of the munged `G
   the log (`ElementText::ReadData`, P `0060C978`). A `{name}` in a string becomes the button
   bound to that action (`FindReplaceMagicStrings_`).
 
-The preview draws each character where the layout places it, with the game font's widths when
-its `.fff` is found; the glyphs themselves are a system typeface at the font's capital height.
+The preview draws each character where the layout places it: the glyph's image at its ink box
+in the cell, filled with the text's colour at the game's coverage. A font that cannot be found is
+stood in for with a system typeface at the stock size of its name.
 Until its events send it something, a text element shows an example of what they would send
 (Text: Examples or Long in the toolbar) or the keys and event names (Keys); with the game's showing
 and hiding on, a text that shows only what its events send stays empty until then.
@@ -278,8 +284,6 @@ BorderedBox and MultilineText with all they hold.
   perspective factor (`Red3DModelElementLite::LocalToWorld`, P `008DECE0`;
   `GetDepthMultiplier`, P `008DEC60`), which brings it near the camera. The preview still
   sizes a mesh unit as 1/7 of the width, an estimate.
-- **Glyph images.** Text is laid out with the game font's metrics, but drawn with a system
-  typeface: the `.fff` glyph images are not decoded yet.
 - **Map, Target, MultilineText, ObjectiveList, VehicleSeating, BorderedBox** draw from
   code the preview does not run; they show as outlines of their Rect.
 - **Time.** The simulation has no clock: fades (`FadeInTime`, `FadeHoldTime` and the rest) are

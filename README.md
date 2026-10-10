@@ -82,7 +82,7 @@ one's for the same key.
 - **Rescan** reads the folders again after files were added to them; the × removes an added
   folder.
 - Textures are `.tga` files and models `.msh` files, as the game's munge reads them; a `.png`
-  does not count. A font gives text its widths; its glyph images are not read yet.
+  does not count. A font, its `.fff` file, gives text its widths and its glyphs.
 
 ## The canvas
 
@@ -140,8 +140,8 @@ one's for the same key.
 
 Text is laid out as the game lays it out: lines break, wrap and clip in their `TextBox` with
 the widths of the game font, read from its `.fff` file, and the box is outlined with the
-guides. The characters themselves are drawn with a system typeface until the font images are
-read.
+guides. Each character is the game font's own glyph, with the sixteen levels of coverage the
+game's font textures keep. A font that cannot be found is stood in for with a system typeface.
 
 Before any event is simulated, **Text** in the toolbar picks what text elements show:
 

@@ -1,16 +1,16 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using SwbfHudEditor.Core.Assets;
 using SwbfHudEditor.Core.Layout;
 
 namespace SwbfHudEditor.App.Views;
 
 /// <summary>
-/// The fonts a HUD's text is laid out and drawn with. A game font's metrics come from its
-/// <c>.fff</c> file, so lines break and clip where the game's do; its glyphs are drawn with a system
-/// typeface at the game font's capital height, as the glyph images are not read yet. A font that
-/// cannot be found is stood in for at the stock size of its name.
+/// The fonts a HUD's text is laid out and drawn with. A game font comes from its <c>.fff</c> file:
+/// lines break and clip where the game's do, and each character is the game's own glyph image. A font
+/// that cannot be found is stood in for with a system typeface at the stock size of its name.
 /// </summary>
 public sealed class TextFonts
 {
@@ -44,10 +44,12 @@ public sealed class TextFonts
     }
 }
 
-/// <summary>A font's metrics, and the system typeface that draws its glyphs at the font's size.</summary>
+/// <summary>A font's metrics, and what draws its glyphs: the game font's images, or a system typeface.</summary>
 public sealed class TextFont
 {
     private static readonly GlyphTypeface? Face = LoadFace();
+    // Each glyph's coverage as an opacity mask, as the game's four-bit texture holds it.
+    private readonly Dictionary<char, ImageBrush?> _masks = new();
 
     public TextFont(ITextFont metrics)
     {
@@ -68,6 +70,20 @@ public sealed class TextFont
     /// <summary>Draw the characters where the layout placed them, in the element's own pixels.</summary>
     public void Draw(DrawingContext dc, IReadOnlyList<PlacedGlyph> glyphs, Brush brush)
     {
+        if (Metrics is FffFont font)
+        {
+            // The glyph's image at its ink box in the cell, filled with the text's colour.
+            foreach (var g in glyphs)
+            {
+                if (font.ImageOf(g.Char) is not { } image || MaskOf(g.Char, image) is not { } mask) continue;
+                dc.PushTransform(new MatrixTransform(g.ScaleX, 0, 0, g.ScaleY, g.X, g.Y));
+                dc.PushOpacityMask(mask);
+                dc.DrawRectangle(brush, null, new Rect(g.Glyph.Left, g.Glyph.Top, image.Width, image.Height));
+                dc.Pop();
+                dc.Pop();
+            }
+            return;
+        }
         if (Face is null) return;
         foreach (var g in glyphs)
         {
@@ -81,6 +97,22 @@ public sealed class TextFont
             dc.DrawGlyphRun(brush, run);
             dc.Pop();
         }
+    }
+
+    private ImageBrush? MaskOf(char c, GlyphImage image)
+    {
+        if (_masks.TryGetValue(c, out var cached)) return cached;
+        var pixels = new byte[image.Width * image.Height * 4];
+        for (var i = 0; i < image.Alpha.Length; i++)
+        {
+            var a = GlyphImage.InGame(image.Alpha[i]);
+            pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = pixels[i * 4 + 3] = a;
+        }
+        var bitmap = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, pixels, image.Width * 4);
+        bitmap.Freeze();
+        var brush = new ImageBrush(bitmap) { Stretch = Stretch.Fill };
+        brush.Freeze();
+        return _masks[c] = brush;
     }
 
     private static GlyphTypeface? LoadFace()

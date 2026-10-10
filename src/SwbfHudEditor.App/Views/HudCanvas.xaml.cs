@@ -1321,6 +1321,12 @@ public partial class HudCanvas : UserControl
 
     private void Canvas_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && _pickColor is not null)
+        {
+            EndPickColor();
+            e.Handled = true;
+            return;
+        }
         if (e.OriginalSource is TextBox or ComboBox) return;
         var step = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 10 : 1;
         System.Windows.Vector? by = e.Key switch
@@ -1389,6 +1395,12 @@ public partial class HudCanvas : UserControl
 
     private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_pickColor is not null)
+        {
+            PickColorAt(e.GetPosition(CanvasSurface));
+            e.Handled = true;
+            return;
+        }
         Focus();   // the arrow keys nudge what is picked here
         var pos = e.GetPosition(CanvasSurface);
         var stack = HitTestAllBlocks(pos);

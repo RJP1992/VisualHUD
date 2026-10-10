@@ -81,6 +81,7 @@ public partial class MainWindow : Window
         Properties.HeightForAspect = HeightForAspect;
         Properties.TextureAspect = TextureAspect;
         Properties.ManyEdited += Properties_ManyEdited;
+        Properties.PickColorFromCanvas = picked => Canvas.BeginPickColor(picked);
         Properties.Preview = () => Canvas.Refresh();
         _undo.Changed += (_, _) =>
         {

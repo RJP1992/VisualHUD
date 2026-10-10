@@ -64,6 +64,9 @@ public partial class PropertyPanel : UserControl
     /// <summary>The events the HUD knows, offered for an event argument. Set by the host.</summary>
     public Func<IReadOnlyList<string>>? KnownEvents { get; set; }
 
+    /// <summary>Take a colour off the canvas with the next click on it, and hand it over.</summary>
+    public Action<Action<Color>>? PickColorFromCanvas { get; set; }
+
     /// <summary>Called while a colour is being picked, before it is committed, to redraw the canvas.</summary>
     public Action? Preview { get; set; }
 
@@ -474,7 +477,11 @@ public partial class PropertyPanel : UserControl
         var colorAt = PropertyArguments.ColorStart(leaf.Name);
         for (var i = 0; i < leaf.Arguments.Count; i++)
         {
-            if (colorAt == i && i + 2 < leaf.Arguments.Count) panel.Children.Add(ColorSwatch(leaf, i));
+            if (colorAt == i && i + 2 < leaf.Arguments.Count)
+            {
+                panel.Children.Add(ColorSwatch(leaf, i));
+                if (PickColorFromCanvas is not null) panel.Children.Add(Eyedropper(leaf, i));
+            }
             panel.Children.Add(ArgEditor(leaf, i));
         }
         if (UnitConversion.Of(leaf.Name) is { } unit && leaf.Arguments.Count <= unit.Mode &&
@@ -888,6 +895,35 @@ public partial class PropertyPanel : UserControl
             popup.IsOpen = true;
         };
         return swatch;
+    }
+
+    /// <summary>A button that takes the line's colour off the canvas: the reference image's, else the HUD's.</summary>
+    private Button Eyedropper(HudBlock leaf, int start)
+    {
+        var button = new Button
+        {
+            Style = ToolButton,
+            Content = new TextBlock { Text = "\uEF3C", Style = IconStyle, FontSize = 12 },
+            MinWidth = 24,
+            MinHeight = 22,
+            Padding = new Thickness(3),
+            Margin = new Thickness(0, 1, 6, 1),
+            ToolTip = "Take the colour off the canvas: click it there. The reference image's own colour where it shows, else the HUD's as drawn; Esc lets it go",
+        };
+        button.Click += (_, _) => PickColorFromCanvas?.Invoke(color =>
+        {
+            // Another element picked in the meantime: its lines are not this one's.
+            if (!_shownLeaves.Any(l => ReferenceEquals(l, leaf))) return;
+            var before = new[] { leaf.Arguments[start], leaf.Arguments[start + 1], leaf.Arguments[start + 2] };
+            SetColor(leaf, start, color);
+            var changes = Enumerable.Range(0, 3)
+                .Where(i => leaf.Arguments[start + i] != before[i])
+                .Select(i => new ArgChange(start + i, before[i], leaf.Arguments[start + i]))
+                .ToList();
+            if (changes.Count > 0) Edited(new PropertyEditedEventArgs(leaf, changes, _block));
+            Rebuild();
+        });
+        return button;
     }
 
     private static Color ColorOf(HudBlock leaf, int start)

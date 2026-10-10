@@ -238,6 +238,9 @@ one's for the same key.
 - In the Properties panel, a colour is a swatch that opens a picker and shows the change as you
   pick; a mode, an alignment, a style, a font or an event is a list, which takes typing too; an
   on/off line is a switch.
+- The eyedropper beside a colour's swatch takes the colour off the canvas with your next click
+  there: the reference image's own pixel where it shows (left of a wipe's divider), else the HUD's
+  as drawn. It is one undo; Esc lets it go.
 - With several elements selected, the Properties panel shows the lines they all have: a value
   they share shows, one they differ in is blank, and a change goes to each of them, the other
   numbers of a line staying each its own. Removing a line, choosing a unit and the **Add** tab work

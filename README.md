@@ -51,6 +51,10 @@ by its own `FileInfo`. The editor works on such a set:
 - **Save** writes every file with unsaved changes, and only those; **Save file as** writes
   the selection's file under a new name. A saved file keeps its comments, blank lines,
   spacing, indentation and line endings: only the lines you edited change.
+- Saving first copies the file as it was into `_backups` beside it, as
+  `name.hud.yyyyMMdd-HHmmss.bak` (the newest 20 of each file are kept; the `.bak` ending keeps the
+  munger off them). If another program changes an open file, the editor asks whether to load it
+  again.
 - Saving leaves out the lines that only restate the engine's defaults, such as `Alpha(1)`
   or `Rotation(0, 0, 0)`; the Properties panel shows them in grey italics. Lines the game
   needs whatever their value stay: `ZOrder`, a key written twice in a block, anything whose
@@ -126,6 +130,10 @@ one's for the same key.
   you drag across the screen, to check an in-game screenshot edge for edge. It is remembered
   between sessions and never saved into a `.hud` file, so a HUD needs no reference element of
   its own.
+- The arrow keys move the selection by a screen pixel (Shift: ten) once the canvas has been
+  clicked, through each element's last `Position` line in its own unit; a run of them undoes as
+  one step. The line above the canvas shows where the mouse is, in screen pixels and in shares of
+  the screen.
 - Ctrl+wheel zooms at the mouse, Shift+wheel scrolls sideways, and the middle button drags the
   view. The buttons on the right zoom, fit the screen in the view, or show it at one pixel per
   pixel.
@@ -242,6 +250,9 @@ game, by GameExt, or by a transform), its type, and who reads it.
   once its `EventEnable` event has come after its `EventDisable` one, and only while every group
   above it shows. Nothing shows before any event, as in the game. **Show hidden** on the canvas
   then draws what is not enabled faintly, so it can still be picked.
+- **Scenarios**: type a name in the box and **Save** to keep the events sent so far, with their
+  times on the clock; pick one from the list to send it again in place of what is sent now. They
+  are kept in the editor's settings.
 - **Initialize** sends `initialize`; **On foot** sends a typical spawned soldier's state and turns
   on the game's showing and hiding; **Show selected** sends whatever shows the selected element;
   **Clear** forgets every event sent.

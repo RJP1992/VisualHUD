@@ -3,6 +3,22 @@ using System.Text.Json;
 
 namespace SwbfHudEditor.App;
 
+/// <summary>A send of a saved scenario: the event, its type, the value as typed, and when on the clock.</summary>
+internal sealed class SavedSend
+{
+    public string Event { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+    public double Time { get; set; }
+}
+
+/// <summary>A named set of sends, in order.</summary>
+internal sealed class SavedScenario
+{
+    public string Name { get; set; } = string.Empty;
+    public List<SavedSend> Sends { get; set; } = new();
+}
+
 /// <summary>The editor's settings, kept per user in <c>%LOCALAPPDATA%\VisualHUD\settings.json</c>.</summary>
 internal sealed class AppSettings
 {
@@ -17,6 +33,9 @@ internal sealed class AppSettings
     public double ReferenceOpacity { get; set; } = 0.5;
     public bool ReferenceOnTop { get; set; }
     public bool ReferenceShown { get; set; } = true;
+
+    /// <summary>Sets of sends saved under a name in the Events tab, to send again in one go.</summary>
+    public List<SavedScenario> Scenarios { get; set; } = new();
 
     /// <summary>The settings file: <c>VISUALHUD_SETTINGS</c> if set, as the tests do, else the user's.</summary>
     internal static string FilePath =>

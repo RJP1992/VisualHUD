@@ -315,7 +315,8 @@
                              BlockSelected="Canvas_BlockSelected"
                              HoverInfoChanged="Canvas_HoverInfoChanged"
                              BlockDragged="Canvas_BlockDragged"
-                             BlockDragCommitted="Canvas_BlockDragCommitted" />
+                             BlockDragCommitted="Canvas_BlockDragCommitted"
+                             NudgeRequested="Canvas_NudgeRequested" />
             <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" />
             <views:PropertyPanel x:Name="Properties" Grid.Column="4"
                                  PropertyEdited="Properties_PropertyEdited"

@@ -17,6 +17,17 @@
                 <Button Content="Clear" Click="Clear_Click" Margin="0,0,4,4"
                         ToolTip="Forget every event sent: every element is back in its load state, and, with the game's showing and hiding, hidden again." />
             </WrapPanel>
+            <!-- Saved sets of sends. -->
+            <DockPanel Margin="0,0,0,6">
+                <Button DockPanel.Dock="Right" Style="{StaticResource ToolButton}" Click="DeleteScenario_Click" Margin="2,0,0,0"
+                        ToolTip="Forget the scenario named in the box.">
+                    <TextBlock Text="&#xE74D;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button DockPanel.Dock="Right" Content="Save" Click="SaveScenario_Click" Margin="4,0,0,0" Padding="10,2"
+                        ToolTip="Save the events sent so far, with their times on the clock, under the name in the box. A name already used is replaced." />
+                <ComboBox x:Name="ScenarioBox" IsEditable="True" SelectionChanged="ScenarioBox_SelectionChanged"
+                          ToolTip="Scenarios: the events sent so far, saved under a name. Pick one to send it again in place of what is sent now; type a name and Save to keep the current one." />
+            </DockPanel>
             <!-- The clock: the sends replayed at their times, a frame at a time. -->
             <DockPanel Margin="0,2,0,6">
                 <ToggleButton x:Name="PlayButton" DockPanel.Dock="Left" Click="Play_Click"

@@ -86,6 +86,10 @@ public partial class MainWindow : Window
         Canvas.SetEventState(_events);
         EventsList.SimulateChanged += (_, on) => Canvas.ShowByEvents = on;
         EventsList.ShowSelectedRequested += (_, _) => ShowSelectedInSimulation();
+        EventsList.ScenarioPicked += (_, name) => ApplyScenario(name);
+        EventsList.ScenarioSaveRequested += (_, name) => SaveScenario(name);
+        EventsList.ScenarioDeleteRequested += (_, name) => DeleteScenario(name);
+        EventsList.ShowScenarios(_settings.Scenarios.Select(s => s.Name));
         EventsList.OnFootRequested += (_, _) =>
         {
             if (Canvas.Transforms is not { } graph) return;
@@ -440,6 +444,7 @@ public partial class MainWindow : Window
     private void AfterSetChanged(string? status = null)
     {
         _defaultLines = null;
+        WatchFiles();
         ClearPicks();
         // The data folders of the open files' mods join the search, read the first time they are needed.
         foreach (var folder in AutomaticAssetFolders()) EnsureScanned(folder);
@@ -668,6 +673,7 @@ public partial class MainWindow : Window
         if (!WriteFile(file, dialog.FileName)) return false;
         file.FilePath = dialog.FileName;
         file.AddedAutomatically = false;
+        WatchFiles();
         UpdateTitle();
         return true;
     }
@@ -676,8 +682,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Lines that only restate the engine's defaults are left out of the file.
+            // Lines that only restate the engine's defaults are left out of the file. The file as it was
+            // goes to _backups first.
+            BackUp(path);
             File.WriteAllText(path, ElementDefaults.WriteWithoutDefaults(file.Document));
+            NoteDiskText(Path.GetFullPath(path));
             file.MarkSaved();
             return true;
         }
@@ -1641,6 +1650,113 @@ public partial class MainWindow : Window
         renaming.Box.Visibility = Visibility.Collapsed;
         renaming.Label.Visibility = Visibility.Visible;
         if (commit) ApplyRename(renaming.Block, renaming.Box.Text);
+    }
+
+    // ---- Scenarios: sets of sends saved under a name ----------------------------------------------------
+
+    /// <summary>Save the sends made so far, with their times, under a name; a name in use is replaced.</summary>
+    internal void SaveScenario(string name)
+    {
+        var history = _events.History;
+        if (history.Count == 0)
+        {
+            StatusText.Text = "Nothing has been sent yet: send events, then save them as a scenario.";
+            return;
+        }
+        var scenario = new SavedScenario
+        {
+            Name = name,
+            Sends = history.Select(s => new SavedSend
+            {
+                Event = s.Name,
+                Type = s.Value.Type.ToString(),
+                Value = ScenarioText(s.Value),
+                Time = s.Time,
+            }).ToList(),
+        };
+        _settings.Scenarios.RemoveAll(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+        _settings.Scenarios.Add(scenario);
+        _settings.Scenarios.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        var error = _settings.Save();
+        EventsList.ShowScenarios(_settings.Scenarios.Select(s => s.Name), name);
+        StatusText.Text = error is null ? $"Saved {history.Count} sends as \"{name}\"." : $"Could not save the scenario: {error}";
+    }
+
+    /// <summary>A value written so it reads back exactly: floats in full, a colour with its alpha.</summary>
+    private static string ScenarioText(HudEventValue v)
+    {
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        return v.Type switch
+        {
+            HudEventType.Float => v.Float.ToString("R", c),
+            HudEventType.Vector3 => string.Join(", ", new[] { v.Vector.X, v.Vector.Y, v.Vector.Z }.Select(f => f.ToString("R", c))),
+            HudEventType.Color => $"{v.Color.R}, {v.Color.G}, {v.Color.B}, {v.Color.A}",
+            _ => HudEventText.Format(v),
+        };
+    }
+
+    /// <summary>Send a saved scenario again, at its times, in place of what is sent now; the clock goes to 0.</summary>
+    internal void ApplyScenario(string name)
+    {
+        if (_settings.Scenarios.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } scenario) return;
+        _events.Clear();
+        var skipped = 0;
+        foreach (var send in scenario.Sends.OrderBy(s => s.Time))
+        {
+            if (!Enum.TryParse<HudEventType>(send.Type, out var type) || !HudEventText.TryParse(type, send.Value, out var value))
+            {
+                skipped++;
+                continue;
+            }
+            _events.SetTime(send.Time);
+            _events.Send(send.Event, value);
+        }
+        _events.SetTime(0);
+        StatusText.Text = $"Sent \"{scenario.Name}\": {scenario.Sends.Count - skipped} events" +
+                          (skipped > 0 ? $", {skipped} that could not be read again skipped." : ".");
+    }
+
+    internal void DeleteScenario(string name)
+    {
+        if (_settings.Scenarios.RemoveAll(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) == 0) return;
+        var error = _settings.Save();
+        EventsList.ShowScenarios(_settings.Scenarios.Select(s => s.Name), string.Empty);
+        StatusText.Text = error is null ? $"Forgot the scenario \"{name}\"." : $"Could not save the settings: {error}";
+    }
+
+    // ---- Nudging: the arrow keys on the canvas move the selection -------------------------------------
+
+    private DateTime _nudgeAt;
+
+    private void Canvas_NudgeRequested(object? sender, System.Windows.Vector by) => Nudge(by.X, by.Y);
+
+    /// <summary>Move the selection by screen pixels; a run of nudges joins one undo step.</summary>
+    internal void Nudge(double dx, double dy)
+    {
+        var blocks = SelectedItems.OfType<HudBlock>().ToList();
+        var changes = Canvas.MoveChanges(blocks, dx, dy);
+        if (changes.Count == 0)
+        {
+            StatusText.Text = blocks.Count == 0 ? "Select an element to move it with the arrow keys."
+                : "Nothing to move: the selection has no Position line (add one from the Add tab).";
+            return;
+        }
+        var now = DateTime.UtcNow;
+        if (_undo.Top is ArgumentsEdit last && last.Description == "nudge" && (now - _nudgeAt).TotalSeconds < 1.5 && last.Covers(changes))
+        {
+            last.Extend(changes);
+            last.Apply();
+            _undo.Touch();
+        }
+        else
+        {
+            var edit = new ArgumentsEdit(changes, "nudge", blocks.FirstOrDefault());
+            edit.Apply();
+            _undo.Push(edit);
+        }
+        _nudgeAt = now;
+        Canvas.Refresh();
+        if (!Properties.RefreshValues()) Properties.SetBlock(Tree.SelectedItem as HudBlock);
     }
 
     // ---- Units: a line's numbers rewritten in another unit, so nothing moves ------------------------------

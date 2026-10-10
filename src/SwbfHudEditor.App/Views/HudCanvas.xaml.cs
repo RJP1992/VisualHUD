@@ -1233,8 +1233,81 @@ public partial class HudCanvas : UserControl
 
     // ---- Mouse: selection and dragging ----------------------------------------------------------------
 
+    // ---- Keyboard: the arrows nudge the selection --------------------------------------------------
+
+    /// <summary>The arrow keys on the canvas: move the selection this many screen pixels (Shift for ten).</summary>
+    public event EventHandler<System.Windows.Vector>? NudgeRequested;
+
+    private void Canvas_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.OriginalSource is TextBox or ComboBox) return;
+        var step = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 10 : 1;
+        System.Windows.Vector? by = e.Key switch
+        {
+            Key.Left => new System.Windows.Vector(-step, 0),
+            Key.Right => new System.Windows.Vector(step, 0),
+            Key.Up => new System.Windows.Vector(0, -step),
+            Key.Down => new System.Windows.Vector(0, step),
+            _ => null,
+        };
+        if (by is not { } move || (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0) return;
+        NudgeRequested?.Invoke(this, move);
+        e.Handled = true;   // not the scroll bars
+    }
+
+    /// <summary>
+    /// The changes that move these elements by (dx, dy) screen pixels: each one's last Position line (its shown
+    /// MeshInfo's for a model), through the inverse of its parent's matrix, in the line's own unit. An element
+    /// inside another one moved too is left to move with it; one without a Position line stays.
+    /// </summary>
+    public List<ArgumentChange> MoveChanges(IEnumerable<HudBlock> blocks, double dx, double dy)
+    {
+        var changes = new List<ArgumentChange>();
+        if (_layout is null) return changes;
+        var elements = blocks.Select(b => _layout.Find(b)).OfType<LaidOutElement>().ToList();
+        foreach (var e in elements)
+        {
+            if (elements.Any(o => !ReferenceEquals(o, e) && IsInside(e, o))) continue;
+            var line = e.PositionOwner.Children.LastOrDefault(c => !c.HasBody && c.Name == "Position" && c.Arguments.Count >= 2);
+            if (line is null || !EngineArgs.IsNumber(line.Arguments[0]) || !EngineArgs.IsNumber(line.Arguments[1])) continue;
+            var delta = e.PositionDeltaFor((float)dx, (float)dy);
+            for (var i = 0; i < 2; i++)
+            {
+                var old = line.Arguments[i];
+                var value = EngineArgs.Float(old) + (i == 0 ? delta.X : delta.Y);
+                var kind = old.Kind == HudArgKind.Integer && value != Math.Round(value) ? HudArgKind.Float : old.Kind;
+                var changed = value == EngineArgs.Float(old) ? old
+                    : new HudArgument(kind, kind == HudArgKind.Integer ? FormatForKind(value, kind) : HudArgument.FromFloat(value).Raw);
+                // Both numbers, moved or not, so a run of nudges in any direction joins one undo step.
+                changes.Add(new ArgumentChange(line, i, old, changed));
+            }
+        }
+        return changes;
+    }
+
+    private static bool IsInside(LaidOutElement e, LaidOutElement container)
+    {
+        for (var p = e.Parent; p is not null; p = p.Parent)
+            if (ReferenceEquals(p, container)) return true;
+        return false;
+    }
+
+    // ---- The cursor's place on the screen --------------------------------------------------------------
+
+    private void ShowCursor(Point at)
+    {
+        if (at.X < 0 || at.Y < 0 || at.X > _screen.Width || at.Y > _screen.Height)
+        {
+            CursorText.Text = string.Empty;
+            return;
+        }
+        CursorText.Text = string.Create(CultureInfo.InvariantCulture,
+            $"{at.X:0.#}, {at.Y:0.#} px   {at.X / _screen.Width:0.0000}, {at.Y / _screen.Height:0.0000}");
+    }
+
     private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        Focus();   // the arrow keys nudge what is picked here
         var pos = e.GetPosition(CanvasSurface);
         var stack = HitTestAllBlocks(pos);
         if (stack.Count == 0) return;
@@ -1532,6 +1605,7 @@ public partial class HudCanvas : UserControl
 
     private void Scroller_PreviewMouseMove(object sender, MouseEventArgs e)
     {
+        ShowCursor(e.GetPosition(CanvasSurface));
         if (_panFrom is not { } from) return;
         var delta = e.GetPosition(Scroller) - from;
         Scroller.ScrollToHorizontalOffset(_panOffset.X - delta.X);

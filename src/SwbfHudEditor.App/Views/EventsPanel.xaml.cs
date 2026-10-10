@@ -64,6 +64,40 @@ public partial class EventsPanel : UserControl
     public event EventHandler? ShowSelectedRequested;
     public event EventHandler? OnFootRequested;
 
+    /// <summary>A scenario picked to send, one to save the sends under, one to forget.</summary>
+    public event EventHandler<string>? ScenarioPicked;
+    public event EventHandler<string>? ScenarioSaveRequested;
+    public event EventHandler<string>? ScenarioDeleteRequested;
+
+    private bool _listingScenarios;
+
+    /// <summary>The saved scenarios' names, in the box's list.</summary>
+    public void ShowScenarios(IEnumerable<string> names, string? current = null)
+    {
+        _listingScenarios = true;
+        ScenarioBox.ItemsSource = names.ToList();
+        ScenarioBox.Text = current ?? ScenarioBox.Text;
+        _listingScenarios = false;
+    }
+
+    private void ScenarioBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_listingScenarios || e.AddedItems.Count == 0 || e.AddedItems[0] is not string name) return;
+        ScenarioPicked?.Invoke(this, name);
+    }
+
+    private void SaveScenario_Click(object sender, RoutedEventArgs e)
+    {
+        var name = ScenarioBox.Text.Trim();
+        if (name.Length > 0) ScenarioSaveRequested?.Invoke(this, name);
+    }
+
+    private void DeleteScenario_Click(object sender, RoutedEventArgs e)
+    {
+        var name = ScenarioBox.Text.Trim();
+        if (name.Length > 0) ScenarioDeleteRequested?.Invoke(this, name);
+    }
+
     public EventsPanel()
     {
         InitializeComponent();

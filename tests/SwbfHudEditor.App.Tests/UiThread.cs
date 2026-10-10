@@ -20,6 +20,7 @@ public static class UiThread
         var scratch = Directory.CreateTempSubdirectory("visualhud-tests-").FullName;
         Environment.SetEnvironmentVariable("VISUALHUD_SETTINGS", Path.Combine(scratch, "settings.json"));
         Environment.SetEnvironmentVariable("VISUALHUD_NO_SCAN", "1");
+        Environment.SetEnvironmentVariable("VISUALHUD_NO_WATCH", "1");
         Dispatcher? dispatcher = null;
         using var ready = new ManualResetEventSlim();
         var thread = new Thread(() =>

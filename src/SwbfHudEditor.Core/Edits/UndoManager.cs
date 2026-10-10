@@ -13,6 +13,12 @@ public sealed class UndoManager
     public event EventHandler? Changed;
 
     public bool CanUndo => _undo.Count > 0;
+
+    /// <summary>The step Undo would take back, for an edit that can still grow (a run of nudges).</summary>
+    public IHudEdit? Top => _undo.Last?.Value;
+
+    /// <summary>The last step grew: listeners refresh as for a new one.</summary>
+    public void Touch() => Changed?.Invoke(this, EventArgs.Empty);
     public bool CanRedo => _redo.Count > 0;
 
     public void Clear()

@@ -5,7 +5,8 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:views="clr-namespace:SwbfHudEditor.App.Views"
              mc:Ignorable="d"
-             Background="{StaticResource CanvasBrush}">
+             Background="{StaticResource CanvasBrush}"
+             Focusable="True" FocusVisualStyle="{x:Null}" PreviewKeyDown="Canvas_PreviewKeyDown">
     <UserControl.Resources>
         <views:InverseBoolConverter x:Key="NotBool" />
     </UserControl.Resources>
@@ -110,8 +111,14 @@
         </Border>
         <!-- How the selection's file is laid out. -->
         <Border DockPanel.Dock="Top" Background="{StaticResource CanvasBrush}" Padding="10,4">
-            <TextBlock x:Name="LayoutInfoText" Foreground="{StaticResource TextMutedBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11"
-                       TextTrimming="CharacterEllipsis" />
+            <DockPanel>
+                <!-- Where the mouse is on the screen. -->
+                <TextBlock x:Name="CursorText" DockPanel.Dock="Right" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="{StaticResource MonoFont}"
+                           FontSize="11" Margin="12,0,0,0"
+                           ToolTip="Where the mouse is: screen pixels, then shares of the screen (what a Viewport or Screen value would be in a file laid out the stock way)." />
+                <TextBlock x:Name="LayoutInfoText" Foreground="{StaticResource TextMutedBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                           TextTrimming="CharacterEllipsis" />
+            </DockPanel>
         </Border>
         <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                       Background="{StaticResource CanvasBrush}" PreviewMouseWheel="Scroller_PreviewMouseWheel"

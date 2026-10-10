@@ -349,13 +349,53 @@ public partial class HudCanvas : UserControl
     /// <summary>The canvas as an image the size of the screen, over <paramref name="background"/> if given.</summary>
     public BitmapSource RenderSnapshot(BitmapSource? background)
     {
-        var w = _screen.Width;
-        var h = _screen.Height;
-        var room = new Size(w + 400, h + 400);
+        var room = new Size(_screen.Width + 400, _screen.Height + 400);
         Measure(room);
         Arrange(new Rect(room));
         UpdateLayout();
+        return DrawSurface(background);
+    }
 
+    /// <summary>
+    /// The HUD as an image the size of the screen, as the canvas draws it, the reference image too when it
+    /// shows, without what is there only to edit by: the selection, the guides, the outlines and hidden
+    /// elements. The canvas is drawn again as it was afterwards.
+    /// </summary>
+    public BitmapSource RenderForExport()
+    {
+        var (outlines, guides, hidden) = (ShowPlaceholdersBox.IsChecked, GuidesBox.IsChecked, ShowHiddenBox.IsChecked);
+        var (selection, current) = (_selection, _currentSelection);
+        void Set(bool? o, bool? g, bool? h)
+        {
+            _ready = false;
+            ShowPlaceholdersBox.IsChecked = o;
+            GuidesBox.IsChecked = g;
+            ShowHiddenBox.IsChecked = h;
+            _ready = true;
+        }
+        Set(false, false, false);
+        _selection = Array.Empty<HudBlock>();
+        _currentSelection = null;
+        try
+        {
+            Render();
+            UpdateLayout();
+            return DrawSurface(null);
+        }
+        finally
+        {
+            Set(outlines, guides, hidden);
+            _selection = selection;
+            _currentSelection = current;
+            Render();
+        }
+    }
+
+    /// <summary>The drawing surface, laid out already, the size of the screen over a background.</summary>
+    private BitmapSource DrawSurface(BitmapSource? background)
+    {
+        var w = _screen.Width;
+        var h = _screen.Height;
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {

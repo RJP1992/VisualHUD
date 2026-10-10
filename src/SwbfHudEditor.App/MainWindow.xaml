@@ -113,6 +113,8 @@
                 <MenuItem Header="Load reference _image..." Click="LoadReference_Click"
                           ToolTip="Lay an image under the HUD, such as a screenshot of the game or a mock-up, stretched across the screen. It is never saved into a .hud file, and is remembered for next time." />
                 <MenuItem Header="Clear reference image" Click="ClearReference_Click" />
+                <MenuItem Header="_Export image..." Click="ExportImage_Click"
+                          ToolTip="Save the HUD as a PNG the size of the Screen, as the canvas draws it (over the reference image when it shows), without the selection, the guides and the outlines." />
                 <MenuItem Header="Add asset _folder..." Click="AddAssetFolder_Click"
                           ToolTip="Search a folder and all its subfolders for the textures, meshes, fonts and localization the HUD's own folders and the stock ones do not have. Remembered for next time." />
                 <Separator />

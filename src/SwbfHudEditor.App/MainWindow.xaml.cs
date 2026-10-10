@@ -130,6 +130,37 @@ public partial class MainWindow : Window
 
     // ── Reference image ──────────────────────────────────────────────────────────────
 
+    /// <summary>Save the HUD as drawn at the canvas's screen, as a PNG.</summary>
+    private void ExportImage_Click(object sender, RoutedEventArgs e)
+    {
+        var screen = Canvas.ScreenSize;
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export the HUD as an image",
+            Filter = "PNG images (*.png)|*.png",
+            FileName = $"{Path.GetFileNameWithoutExtension(ActiveFile?.Name ?? "hud")}_{screen.Width}x{screen.Height}.png",
+            InitialDirectory = Path.GetDirectoryName(ActiveFile?.FilePath) is { } folder && Directory.Exists(folder) ? folder : StartFolder(),
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            ExportImage(dialog.FileName);
+            StatusText.Text = $"Saved the HUD as drawn at {screen.Width}×{screen.Height} to {dialog.FileName}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, $"{dialog.FileName}\n\n{ex.Message}", "Failed to save the image", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    internal void ExportImage(string path)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(Canvas.RenderForExport()));
+        using var file = File.Create(path);
+        encoder.Save(file);
+    }
+
     private void LoadReference_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog

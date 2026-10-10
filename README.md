@@ -276,6 +276,10 @@ What is hidden here is hidden on the canvas only; the files do not change.
   hides its elements.
 - **Shift+H**, or a **Ctrl+click** on a tick, shows only that element or file. The other files,
   and every element that neither holds it nor is in it, are hidden; everything in it shows.
+- **L**, or the lock beside the eye, locks the selection: a locked element and what it holds (all
+  of a locked file's elements) are not picked or dragged on the canvas, so what is under them can
+  be, while the tree and the Properties panel still select and edit them. **Alt+L** unlocks
+  everything. Like hiding, locking is the editor's: the files do not change.
 - **Alt+H** shows everything again. The tree's right-click menu has these under **Show and
   hide**, with **Show everything in this** for one element or file.
 - **Ctrl+click** rows to select several, or **Shift+click** to select every row from the last one

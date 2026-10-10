@@ -72,6 +72,7 @@ public partial class MainWindow : Window
         BuildInsertMenu(TreeInsertAfter, inside: false);
         BuildInsertMenu(ToolbarInsertMenu, inside: true);
         Canvas.DocumentVisible = doc => FileOf(doc)?.IsVisible ?? true;
+        Canvas.DocumentLocked = doc => FileOf(doc)?.IsLocked ?? false;
         Properties.IsDefaultLine = line => (_defaultLines ??= FindDefaultLines()).Contains(line);
         Properties.ParentOf = block => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
         Properties.KnownEvents = KnownEvents;
@@ -960,6 +961,54 @@ public partial class MainWindow : Window
         }
         if (_suppressSyncBack) return;
         ShowSelection();
+    }
+
+    public static readonly RoutedCommand ToggleLockCommand = new("ToggleLock", typeof(MainWindow));
+    public static readonly RoutedCommand UnlockAllCommand = new("UnlockAll", typeof(MainWindow));
+
+    private static bool IsLockedInTree(object item) => item switch
+    {
+        HudBlock b => b.IsLocked,
+        HudFile f => f.IsLocked,
+        _ => false,
+    };
+
+    private static void SetLockedInTree(object item, bool locked)
+    {
+        if (item is HudBlock b) b.IsLocked = locked;
+        else if (item is HudFile f) f.IsLocked = locked;
+    }
+
+    /// <summary>A lock's click: on a selected row, every selected row follows it.</summary>
+    private void LockCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: { } item }) return;
+        var locked = IsLockedInTree(item);
+        if (_picked.Count > 1 && _picked.Contains(item))
+            foreach (var other in _picked) SetLockedInTree(other, locked);
+        StatusText.Text = locked
+            ? "Locked: the canvas does not pick or drag it, nor what it holds, so what is under it can be. L or the lock again unlocks it."
+            : "Unlocked.";
+    }
+
+    /// <summary>L: lock the selection, or unlock it if all of it is locked.</summary>
+    private void ToggleLock_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        var items = SelectedItems.Where(i => i is HudBlock or HudFile).ToList();
+        if (items.Count == 0) return;
+        var locked = !items.All(IsLockedInTree);
+        foreach (var item in items) SetLockedInTree(item, locked);
+        StatusText.Text = $"{(locked ? "Locked" : "Unlocked")}: {Describe(items)}.";
+    }
+
+    private void UnlockAll_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        foreach (var file in _files)
+        {
+            file.IsLocked = false;
+            foreach (var block in AllBlocks(file.Document.TopLevel)) block.IsLocked = false;
+        }
+        StatusText.Text = "Unlocked everything.";
     }
 
     private void VisibilityCheckBox_Click(object sender, RoutedEventArgs e)

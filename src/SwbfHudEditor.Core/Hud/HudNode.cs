@@ -30,6 +30,22 @@ public sealed class HudBlock : INotifyPropertyChanged
         }
     }
 
+    private bool _isLocked;
+    /// <summary>
+    /// Editor-only: the canvas does not pick or drag this block or what it holds; the tree and the Properties
+    /// panel still do. Not serialized.
+    /// </summary>
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set
+        {
+            if (_isLocked == value) return;
+            _isLocked = value;
+            OnPropertyChanged();
+        }
+    }
+
     private bool _isMultiSelected;
     /// <summary>Editor-only: one of several rows selected together in the Elements tree. Not serialized.</summary>
     public bool IsMultiSelected

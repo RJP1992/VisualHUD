@@ -53,6 +53,31 @@
             </Setter>
         </Style>
 
+        <!-- A lock: faint until locked, so it does not crowd the rows. -->
+        <Style x:Key="LockToggle" TargetType="CheckBox">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border Background="Transparent" Width="18" Height="18">
+                            <TextBlock x:Name="Glyph" Text="&#xE785;" Style="{StaticResource Icon}" FontSize="11"
+                                       Foreground="{StaticResource TextMutedBrush}" Opacity="0.35" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Glyph" Property="Text" Value="&#xE72E;" />
+                                <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource WarningBrush}" />
+                                <Setter TargetName="Glyph" Property="Opacity" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Glyph" Property="Opacity" Value="1" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <views:ElementsOnlyConverter x:Key="ElementsOnly" />
 
         <!-- A file of the HUD, in load order: the game loads a HUD's files additively, each laid out
@@ -62,6 +87,9 @@
                 <CheckBox Style="{StaticResource EyeToggle}" IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,2,0"
                           VerticalAlignment="Center" Click="VisibilityCheckBox_Click"
                           ToolTip="Show or hide this file's elements on the canvas; on a selected row, every selected row. Ctrl+click shows only this file." />
+                <CheckBox Style="{StaticResource LockToggle}" IsChecked="{Binding IsLocked, Mode=TwoWay}" Margin="0,0,2,0"
+                          VerticalAlignment="Center" Click="LockCheckBox_Click"
+                          ToolTip="Lock this file's elements: the canvas does not pick or drag them, so what is under them can be. The tree still selects them. On a selected row, every selected row (L)." />
                 <TextBlock Text="&#xE8A5;" Style="{StaticResource Icon}" FontSize="12" Foreground="{StaticResource FileBrush}" Margin="0,0,6,0" />
                 <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{StaticResource FileBrush}" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding Note}" Foreground="{StaticResource TextMutedBrush}" FontStyle="Italic" Margin="8,0,0,0" VerticalAlignment="Center" />
@@ -76,6 +104,9 @@
                 <CheckBox Style="{StaticResource EyeToggle}" IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,2,0"
                           VerticalAlignment="Center" Click="VisibilityCheckBox_Click"
                           ToolTip="Show or hide this element and what it holds on the canvas; on a selected row, every selected row. Ctrl+click shows only this element." />
+                <CheckBox Style="{StaticResource LockToggle}" IsChecked="{Binding IsLocked, Mode=TwoWay}" Margin="0,0,2,0"
+                          VerticalAlignment="Center" Click="LockCheckBox_Click"
+                          ToolTip="Lock this element and what it holds: the canvas does not pick or drag them, so what is under them can be. The tree still selects them. On a selected row, every selected row (L)." />
                 <StackPanel x:Name="HeaderLabel" Orientation="Horizontal" Background="Transparent">
                     <TextBlock x:Name="KindLabel" Text="{Binding Name}" Foreground="{StaticResource TextMutedBrush}" FontSize="11.5"
                                VerticalAlignment="Center" Margin="0,0,6,0" />
@@ -169,6 +200,10 @@
                 <MenuItem Header="Show only the selection" Click="ShowOnly_Click" InputGestureText="Shift+H" />
                 <MenuItem Header="Show everything in the selection" Click="ShowInside_Click" />
                 <MenuItem Header="Show all" Click="ShowAll_Click" InputGestureText="Alt+H" />
+                <Separator />
+                <MenuItem Header="Lock or unlock the selection" Command="{x:Static local:MainWindow.ToggleLockCommand}" InputGestureText="L"
+                          ToolTip="A locked element is not picked or dragged on the canvas, so what is under it can be; the tree still selects it." />
+                <MenuItem Header="Unlock all" Command="{x:Static local:MainWindow.UnlockAllCommand}" InputGestureText="Alt+L" />
                 <Separator />
                 <MenuItem Header="Expand all rows" Click="ExpandAll_Click" />
                 <MenuItem Header="Collapse all rows" Click="CollapseAll_Click" />
@@ -365,6 +400,8 @@
         <KeyBinding Key="F2" Command="{x:Static local:MainWindow.RenameCommand}" />
         <KeyBinding Key="H" Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" />
         <KeyBinding Modifiers="Alt" Key="H" Command="{x:Static local:MainWindow.UnhideAllCommand}" />
+        <KeyBinding Key="L" Command="{x:Static local:MainWindow.ToggleLockCommand}" />
+        <KeyBinding Modifiers="Alt" Key="L" Command="{x:Static local:MainWindow.UnlockAllCommand}" />
         <KeyBinding Modifiers="Shift" Key="H" Command="{x:Static local:MainWindow.ShowOnlySelectedCommand}" />
     </Window.InputBindings>
     <Window.CommandBindings>
@@ -385,6 +422,8 @@
         <CommandBinding Command="{x:Static NavigationCommands.Refresh}" Executed="Reload_Executed" CanExecute="Reload_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" Executed="ToggleHideSelected_Executed" CanExecute="HideCommand_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.UnhideAllCommand}" Executed="UnhideAll_Executed" CanExecute="HideCommand_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.ToggleLockCommand}" Executed="ToggleLock_Executed" CanExecute="HideCommand_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.UnlockAllCommand}" Executed="UnlockAll_Executed" CanExecute="HideCommand_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.RenameCommand}" Executed="Rename_Executed" />
         <CommandBinding Command="{x:Static local:MainWindow.ShowOnlySelectedCommand}" Executed="ShowOnly_Executed" CanExecute="HideCommand_CanExecute" />
     </Window.CommandBindings>

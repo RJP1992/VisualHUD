@@ -1647,13 +1647,32 @@ public partial class HudCanvas : UserControl
             {
                 if (node is FrameworkElement { Tag: HudBlock block })
                 {
-                    if (!hits.Contains(block)) hits.Add(block);
+                    if (!hits.Contains(block) && !IsLocked(block)) hits.Add(block);
                     break;
                 }
             }
             return HitTestResultBehavior.Continue;
         }, new PointHitTestParameters(pos));
         return hits;
+    }
+
+    /// <summary>The blocks the canvas would pick at a point, topmost first: the tests' way in.</summary>
+    internal IReadOnlyList<HudBlock> BlocksAt(Point pos) => HitTestAllBlocks(pos);
+
+    /// <summary>Editor-only: whether a file's elements are locked against picking on the canvas.</summary>
+    public Func<HudDocument, bool>? DocumentLocked { get; set; }
+
+    /// <summary>
+    /// Locked against picking: the block, a block it is in, or its file. A copy code draws of a template is
+    /// its owner's.
+    /// </summary>
+    private bool IsLocked(HudBlock block)
+    {
+        if (block.IsLocked) return true;
+        var e = _layout?.Find(block) ?? _layout?.All.FirstOrDefault(x => ReferenceEquals(x.PickBlock, block));
+        for (var p = e; p is not null; p = p.Parent)
+            if (p.Block.IsLocked) return true;
+        return e is not null && DocumentLocked?.Invoke(e.Document) == true;
     }
 
     private static string FormatForKind(double n, HudArgKind kind) => kind switch

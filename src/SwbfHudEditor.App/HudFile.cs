@@ -99,6 +99,19 @@ public sealed class HudFile : INotifyPropertyChanged
         }
     }
 
+    private bool _isLocked;
+    /// <summary>Editor-only: the canvas does not pick or drag this file's elements.</summary>
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set
+        {
+            if (_isLocked == value) return;
+            _isLocked = value;
+            OnPropertyChanged();
+        }
+    }
+
     private bool _isMultiSelected;
     /// <summary>Editor-only: one of several rows selected together in the Elements tree.</summary>
     public bool IsMultiSelected

@@ -50,7 +50,7 @@
                 <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="11" HorizontalAlignment="Left" Margin="8,0,0,0"
                            Foreground="{StaticResource TextMutedBrush}" IsHitTestVisible="False" />
             </Grid>
-            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). It is sent at the clock's time; what it sets shows at once, and with the clock running fades and easing play out. It shows or hides elements only with the box above ticked." Foreground="{StaticResource TextMutedBrush}"
+            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). Up and Down, or the wheel in a number you have clicked, step it and send each step (Shift ten times as far, Alt a hundred, Ctrl a tenth). It is sent at the clock's time; what it sets shows at once, and with the clock running fades and easing play out. It shows or hides elements only with the box above ticked." Foreground="{StaticResource TextMutedBrush}"
                        FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
         </StackPanel>
         <ListBox x:Name="EventList" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
@@ -87,6 +87,8 @@
                                        VerticalAlignment="Center" ToolTip="The value it has now." />
                             <ComboBox IsEditable="True" Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}"
                                       ItemsSource="{Binding Suggestions}" KeyDown="Value_KeyDown"
+                                      PreviewKeyDown="Value_PreviewKeyDown" PreviewMouseWheel="Value_PreviewMouseWheel"
+                                      PreviewKeyUp="Value_PreviewKeyUp"
                                       SelectionChanged="Value_SelectionChanged" />
                         </DockPanel>
                     </Grid>

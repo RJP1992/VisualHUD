@@ -265,6 +265,53 @@ public partial class EventsPanel : UserControl
         e.Handled = true;
     }
 
+    // The wheel's turn not yet a whole notch, and a step taken with Alt held, whose release must not open the menu.
+    private int _wheel;
+    private bool _altStepped;
+
+    /// <summary>
+    /// Step a number's value and send it: one for an Int, a hundredth for a Float; Shift ten times as far,
+    /// Alt a hundred times, Ctrl a tenth. Other types keep the box's own keys.
+    /// </summary>
+    internal bool Step(EventRow row, int count, ModifierKeys keys)
+    {
+        if (row.Type is not (HudEventType.Int or HudEventType.Float) || !HudEventText.TryParse(row.Type, row.ValueText, out var value))
+            return false;
+        var whole = row.Type == HudEventType.Int;
+        var moved = NumberSteps.Move(whole ? value.Int : value.Float, count, NumberSteps.For(whole, keys));
+        row.ValueText = HudEventText.Format(whole ? HudEventValue.FromInt((int)Math.Round(moved)) : HudEventValue.FromFloat((float)moved));
+        Send(row);
+        if (keys.HasFlag(ModifierKeys.Alt)) _altStepped = true;
+        return true;
+    }
+
+    private void Value_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is not (Key.Up or Key.Down) || sender is not FrameworkElement { DataContext: EventRow row }) return;
+        if (Step(row, key == Key.Up ? 1 : -1, Keyboard.Modifiers)) e.Handled = true;
+    }
+
+    /// <summary>The wheel steps a number being typed in, sending each step; over any other box it scrolls the list.</summary>
+    private void Value_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not ComboBox { IsKeyboardFocusWithin: true, IsDropDownOpen: false, DataContext: EventRow row } ||
+            row.Type is not (HudEventType.Int or HudEventType.Float)) return;
+        e.Handled = true;
+        _wheel += e.Delta;
+        var notches = _wheel / NumberSteps.Notch;
+        if (notches == 0) return;
+        _wheel -= notches * NumberSteps.Notch;
+        Step(row, notches, Keyboard.Modifiers);
+    }
+
+    private void Value_PreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        if (!_altStepped || e.Key != Key.System || e.SystemKey is not (Key.LeftAlt or Key.RightAlt)) return;
+        _altStepped = false;
+        e.Handled = true;
+    }
+
     private void Value_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // Picking a suggestion sends it.

@@ -15,9 +15,10 @@ public sealed record ArgChange(int Index, HudArgument Old, HudArgument New);
 
 /// <summary>
 /// Fired when arguments of a line were edited in the panel (they are already changed): the host makes
-/// one undoable edit of them. A colour picked is its three arguments at once.
+/// one undoable edit of them. A colour picked is its three arguments at once. <see cref="Stepped"/>: by the
+/// arrow keys or the wheel, so a run of steps on the same numbers can undo as one.
 /// </summary>
-public sealed record PropertyEditedEventArgs(HudBlock Leaf, IReadOnlyList<ArgChange> Changes, HudBlock? SelectedBlock);
+public sealed record PropertyEditedEventArgs(HudBlock Leaf, IReadOnlyList<ArgChange> Changes, HudBlock? SelectedBlock, bool Stepped = false);
 
 /// <summary>Fired when the user clicks an "Add" tab button to insert a property as a child of
 /// <see cref="Target"/>. Carries the already-built leaf <see cref="Property"/> so the host can
@@ -80,7 +81,22 @@ public partial class PropertyPanel : UserControl
     public PropertyPanel()
     {
         InitializeComponent();
+        PreviewKeyUp += (_, e) =>
+        {
+            if (!_altStepped || e.Key != Key.System || e.SystemKey is not (Key.LeftAlt or Key.RightAlt)) return;
+            _altStepped = false;
+            e.Handled = true;
+        };
     }
+
+    // A number stepped with Alt held: its release must not open the menu.
+    private bool _altStepped;
+    // A step being committed, and the wheel's turn not yet a whole notch.
+    private bool _stepping;
+    private int _wheel;
+
+    /// <summary>Whether a box takes the wheel: the one being typed in. The tests, whose windows are never active, say so.</summary>
+    internal Func<TextBox, bool> TakesWheel { get; set; } = box => box.IsKeyboardFocusWithin;
 
     private Brush Res(string key) => (Brush)FindResource(key);
 
@@ -372,12 +388,13 @@ public partial class PropertyPanel : UserControl
             Width = choices is not null ? 118 : arg.Kind == HudArgKind.String ? 150 : 66,
             Margin = new Thickness(0, 1, 4, 1),
             ToolTip = arg.Kind is HudArgKind.Integer or HudArgKind.Float
-                ? $"{tip}: Up and Down change it (Shift by more, Ctrl by less); sums such as 128/4 are worked out"
+                ? $"{tip}: {NumberSteps.Help.ToLowerInvariant()[0]}{NumberSteps.Help[1..]}; sums such as 128/4 are worked out"
                 : tip,
             Tag = (leaf, index),
         };
         box.LostFocus += (_, _) => Commit(leaf, index, box.Text);
         box.PreviewKeyDown += (_, e) => Arg_KeyDown(box, leaf, index, e);
+        box.PreviewMouseWheel += (_, e) => Arg_Wheel(box, leaf, index, e);
         _editors.Add((box, leaf, index));
         if (choices is null) return box;
 
@@ -602,20 +619,52 @@ public partial class PropertyPanel : UserControl
                 box.Text = current.Raw;
                 e.Handled = true;
                 break;
-            case Key.Up or Key.Down when current.Kind is HudArgKind.Integer or HudArgKind.Float &&
-                                         double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value):
-                var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
-                var ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
-                var step = current.Kind == HudArgKind.Integer ? (shift ? 10 : 1) : shift ? 0.1 : ctrl ? 0.001 : 0.01;
-                value += e.Key == Key.Up ? step : -step;
-                box.Text = current.Kind == HudArgKind.Integer
-                    ? ((long)Math.Round(value)).ToString(CultureInfo.InvariantCulture)
-                    : HudArgument.FromFloat(value).Raw;
-                Commit(leaf, index, box.Text);
-                box.CaretIndex = box.Text.Length;
-                e.Handled = true;
-                break;
         }
+        // With Alt held the key comes as a system key.
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is not (Key.Up or Key.Down) || current.Kind is not (HudArgKind.Integer or HudArgKind.Float)) return;
+        Step(box, leaf, index, key == Key.Up ? 1 : -1, Keyboard.Modifiers);
+        e.Handled = true;
+    }
+
+    /// <summary>The wheel steps a number being typed in; over any other box it scrolls the panel.</summary>
+    private void Arg_Wheel(TextBox box, HudBlock leaf, int index, MouseWheelEventArgs e)
+    {
+        if (!TakesWheel(box) || leaf.Arguments[index].Kind is not (HudArgKind.Integer or HudArgKind.Float)) return;
+        e.Handled = true;
+        // A fine wheel or a touchpad turns less than a notch at a time: whole notches step.
+        _wheel += e.Delta;
+        var notches = _wheel / NumberSteps.Notch;
+        if (notches == 0) return;
+        _wheel -= notches * NumberSteps.Notch;
+        Step(box, leaf, index, notches, Keyboard.Modifiers);
+    }
+
+    /// <summary>
+    /// Move a number by <paramref name="count"/> steps (<see cref="NumberSteps"/>): one for a whole number or
+    /// a count of pixels, a hundredth otherwise. A whole count of pixels taking a tenth becomes a fraction,
+    /// as a position or a size may; any other whole number stays whole.
+    /// </summary>
+    internal void Step(TextBox box, HudBlock leaf, int index, int count, ModifierKeys keys)
+    {
+        var current = leaf.Arguments[index];
+        if (current.Kind is not (HudArgKind.Integer or HudArgKind.Float) ||
+            !double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) return;
+        var unit = IsUnitNumber(leaf, index);
+        var pixels = unit && UnitConversion.Of(leaf.Name) is not null && UnitConversion.ModeOf(leaf) == RelativeMode.Pixels;
+        var step = NumberSteps.For(current.Kind == HudArgKind.Integer || pixels, keys);
+        if (current.Kind == HudArgKind.Integer && !unit) step = Math.Max(1, Math.Round(step));
+        value = NumberSteps.Move(value, count, step);
+        var text = current.Kind == HudArgKind.Integer && value == Math.Round(value)
+            ? ((long)value).ToString(CultureInfo.InvariantCulture)
+            : HudArgument.FromFloat(value).Raw;
+        box.Text = text;
+        _stepping = true;
+        try { Commit(leaf, index, text); }
+        finally { _stepping = false; }
+        box.Text = leaf.Arguments[index].Raw;
+        box.CaretIndex = box.Text.Length;
+        if (keys.HasFlag(ModifierKeys.Alt)) _altStepped = true;
     }
 
     /// <summary>A 0/1 line as a switch, written as the line had it: 1/0, 1.000000/0.000000 or true/false.</summary>
@@ -770,7 +819,7 @@ public partial class PropertyPanel : UserControl
                 changes.Add(new ArgChange(1, oldHeight, newHeight));
             }
         }
-        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, changes, _block));
+        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, changes, _block, _stepping));
         if (changes.Count > 1) RefreshValues();
     }
 

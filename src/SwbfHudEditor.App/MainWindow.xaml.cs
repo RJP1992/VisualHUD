@@ -749,15 +749,35 @@ public partial class MainWindow : Window
 
     private void Properties_PropertyEdited(object? sender, PropertyEditedEventArgs e)
     {
-        var edits = e.Changes
-            .Select(c => (IHudEdit)new ReplaceArgumentEdit(e.Leaf, c.Index, c.Old, c.New, affected: e.SelectedBlock))
-            .ToList();
-        _undo.Push(edits.Count == 1 ? edits[0] : new CompositeEdit(edits, $"edit {e.Leaf.Name}"));
+        if (e.Stepped)
+        {
+            // Steps of the arrows or the wheel on the same numbers, one after another, undo as one.
+            var steps = e.Changes.Select(c => new ArgumentChange(e.Leaf, c.Index, c.Old, c.New)).ToList();
+            var now = DateTime.UtcNow;
+            var description = $"step {e.Leaf.Name}";
+            if (_undo.Top is ArgumentsEdit last && last.Description == description && (now - _stepAt).TotalSeconds < 1.5 && last.Covers(steps))
+            {
+                last.Extend(steps);
+                _undo.Touch();
+            }
+            else _undo.Push(new ArgumentsEdit(steps, description, e.SelectedBlock));
+            _stepAt = now;
+        }
+        else
+        {
+            var edits = e.Changes
+                .Select(c => (IHudEdit)new ReplaceArgumentEdit(e.Leaf, c.Index, c.Old, c.New, affected: e.SelectedBlock))
+                .ToList();
+            _undo.Push(edits.Count == 1 ? edits[0] : new CompositeEdit(edits, $"edit {e.Leaf.Name}"));
+        }
         _knownEvents = null;
         Canvas.Refresh();
         RefreshEventList();
         Properties.RefreshDefaultMarks();
     }
+
+    // When the last step of the arrows or the wheel was taken, to join the next to it.
+    private DateTime _stepAt;
 
     // The event names offered for an event argument: the game's, GameExt's and the HUD's own.
     private IReadOnlyList<string>? _knownEvents;

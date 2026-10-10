@@ -205,10 +205,15 @@ one's for the same key.
   in the Properties panel.
 - In the Properties panel, a colour is a swatch that opens a picker and shows the change as you
   pick; a mode, an alignment, a style, a font or an event is a list, which takes typing too; an
-  on/off line is a switch. Up and Down step a number (Shift for ten times or 0.1, Ctrl for 0.001).
+  on/off line is a switch.
+- Up and Down step a number, and so does the mouse wheel once the box is clicked (over any other
+  box the wheel scrolls the panel): by one for a whole number or a count of pixels, by 0.01 for
+  any other fraction; **Shift** ten times as far, **Alt** a hundred times, **Ctrl** a tenth. A
+  run of steps on the same numbers is one undo step.
 - A number box works out sums: `5.12*2`, `128/4`, `(1920 - 64) / 2`. A number of pixels, as
   `960px`, is put in the line's own unit, so a Viewport position can be typed in pixels. The
-  Events tab's value boxes take sums too.
+  Events tab's value boxes take sums too, and a number there steps the same way, sent at each
+  step, to sweep a bar or a fade.
 - **Units.** Choosing another unit for a `Position`, `Rect` or `BitmapRect` (Pixels, Screen,
   Viewport, or Frame for a position) converts its numbers, so the element keeps its place and
   size at the canvas's **Screen**. A line written without a unit shows the one the game reads it

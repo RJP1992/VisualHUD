@@ -53,6 +53,16 @@
                               Checked="Option_Changed" Unchecked="Option_Changed"
                               ToolTip="While simulating events, draw the elements their events have not enabled faintly, so they can still be picked." />
 
+                    <CheckBox x:Name="ReferenceBox" Content="Reference" IsEnabled="False" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Show the reference image loaded with File &gt; Load reference image, stretched across the screen. It is never saved into a .hud file." />
+                    <Slider x:Name="ReferenceOpacitySlider" Minimum="0.1" Maximum="1.0" Value="0.5" Width="70" VerticalAlignment="Center"
+                            IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" ValueChanged="ReferenceSlider_Changed"
+                            ToolTip="The reference image's opacity." />
+                    <CheckBox x:Name="ReferenceOnTopBox" Content="On top" Foreground="#999" VerticalAlignment="Center" Margin="6,0,16,0"
+                              IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Draw the reference image over the HUD instead of under it, to compare edges." />
+
                     <TextBlock Text="Text:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox x:Name="TextPreviewCombo" SelectedIndex="0" Width="90" Margin="0,0,16,0" SelectionChanged="TextPreviewCombo_SelectionChanged"
                               ToolTip="What text elements show before their events are simulated. Examples: what the game would typically put there, and the strings of the keys. Long: long names, large numbers and paragraphs, to see how a box holds them. Keys: the keys and event names the file names.">

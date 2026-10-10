@@ -58,8 +58,10 @@
             </TabItem>
             <TabItem Header="ADD" Style="{StaticResource VerticalTabItem}">
                 <DockPanel Background="#1E1E1E">
-                    <TextBlock DockPanel.Dock="Top" Text="Insert a property into the selected element. Only properties valid for this element type and not already present are shown."
+                    <TextBlock DockPanel.Dock="Top" Text="What the game reads for the selected block, less what it already has. Click one to add it with a starting value."
                                Foreground="#888" FontSize="11" TextWrapping="Wrap" Margin="8,8,8,4" />
+                    <TextBox x:Name="AddFilter" DockPanel.Dock="Top" Margin="8,0,8,4" TextChanged="AddFilter_TextChanged"
+                             ToolTip="Show the properties whose name or description contains this." />
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                   Background="#1E1E1E" BorderThickness="0">
                         <StackPanel x:Name="AddRows" Margin="6" />

@@ -12,6 +12,12 @@ internal sealed class AppSettings
     /// </summary>
     public List<string> AssetFolders { get; set; } = new();
 
+    /// <summary>The reference image laid under the HUD, if one is loaded, and how it is shown.</summary>
+    public string? ReferenceImage { get; set; }
+    public double ReferenceOpacity { get; set; } = 0.5;
+    public bool ReferenceOnTop { get; set; }
+    public bool ReferenceShown { get; set; } = true;
+
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VisualHUD", "settings.json");
 

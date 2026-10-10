@@ -28,6 +28,9 @@ public partial class PropertyPanel : UserControl
     /// <summary>Whether a line only restates the engine's default, so saving leaves it out. Set by the host.</summary>
     public Func<HudBlock, bool>? IsDefaultLine { get; set; }
 
+    /// <summary>The block holding a block, which tells what a template reads. Set by the host.</summary>
+    public Func<HudBlock, HudBlock?>? ParentOf { get; set; }
+
     public event EventHandler<PropertyEditedEventArgs>? PropertyEdited;
     public event EventHandler<PropertyInsertRequestedEventArgs>? PropertyInsertRequested;
     public event EventHandler<PropertyDeleteRequestedEventArgs>? PropertyDeleteRequested;
@@ -111,26 +114,50 @@ public partial class PropertyPanel : UserControl
     }
 
     /// <summary>
-    /// Populate the "Add" tab with a vertical list of buttons, one per property that's valid
-    /// for this element AND not already present. When everything's already present, show a
-    /// friendly "nothing to add" message. Each button exposes a short description as a tooltip
-    /// and fires <see cref="PropertyInsertRequested"/> on click.
+    /// Fill the "Add" tab: what the game reads for this block and it does not have yet, under
+    /// headings, narrowed by the filter box. Each button fires <see cref="PropertyInsertRequested"/>.
     /// </summary>
     private void RebuildAddTab()
     {
         if (_block is null) return;
 
-        var addable = PropertyCatalog.GetAddable(_block).ToList();
+        var filter = AddFilter.Text.Trim();
+        var addable = PropertyCatalog.GetAddable(_block, ParentOf?.Invoke(_block))
+            .Where(d => filter.Length == 0 || d.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                        d.Description.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .ToList();
         if (addable.Count == 0)
         {
-            AddRows.Children.Add(HintText($"{_block.Name} has every supported property already. Nothing left to add."));
+            AddRows.Children.Add(HintText(filter.Length > 0
+                ? $"Nothing {_block.Name} can take matches \"{filter}\"."
+                : $"{_block.Name} already has everything the game reads for it, or the game reads nothing more here."));
             return;
         }
 
+        string? group = null;
         foreach (var def in addable)
         {
+            if (def.Group != group)
+            {
+                group = def.Group;
+                AddRows.Children.Add(new TextBlock
+                {
+                    Text = group.ToUpperInvariant(),
+                    Foreground = new SolidColorBrush(Color.FromRgb(143, 184, 222)),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(2, AddRows.Children.Count == 0 ? 2 : 10, 0, 4),
+                });
+            }
             AddRows.Children.Add(BuildAddButton(def));
         }
+    }
+
+    private void AddFilter_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_block is null) return;
+        AddRows.Children.Clear();
+        RebuildAddTab();
     }
 
     /// <summary>One button in the "Add" tab: bold name on top, gray description below, click to add.</summary>
@@ -138,7 +165,7 @@ public partial class PropertyPanel : UserControl
     {
         var title = new TextBlock
         {
-            Text = def.Name,
+            Text = def.IsBlock ? def.Name + " { }" : def.Name,
             Foreground = new SolidColorBrush(Color.FromRgb(212, 232, 255)),
             FontFamily = MonoFont,
             FontWeight = FontWeights.SemiBold,
@@ -166,7 +193,7 @@ public partial class PropertyPanel : UserControl
             BorderBrush = new SolidColorBrush(Color.FromRgb(64, 64, 64)),
             BorderThickness = new Thickness(1),
             Cursor = Cursors.Hand,
-            ToolTip = $"Insert {def.Name}(...) as a child of the selected element.",
+            ToolTip = def.IsBlock ? $"Add a {def.Name} block to the selected element." : $"Add {def.Name}(...) to the selected element.",
             Tag = def,
         };
         btn.Click += AddButton_Click;

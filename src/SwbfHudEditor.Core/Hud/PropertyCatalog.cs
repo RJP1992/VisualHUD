@@ -1,162 +1,408 @@
+using SwbfHudEditor.Core.Layout;
+
 namespace SwbfHudEditor.Core.Hud;
 
 /// <summary>
-/// Catalog of properties the user can insert into an existing HudBlock via the Properties
-/// panel's "Add" tab. Each entry encodes:
-///   • Which element types it's valid for (empty = universal).
-///   • A factory producing a fresh property block with sensible defaults.
-///   • A short description for the tooltip.
-/// Only properties that (a) apply to the current element type AND (b) aren't already present
-/// on the block are shown to the user. That lets "Add Rotation" disappear once it's added.
+/// The properties the Properties panel's Add tab offers a block: every key the game reads for that
+/// block, by the class that reads it (BF2GameExt <c>docs/RE/HUDElementProperties.md</c>: each
+/// class's <c>ReadData</c> takes its own keys and passes the rest to its base), plus GameExt's.
+/// Each comes with a starting value and a line on what it does. A line already in the block is not
+/// offered again; a sub-scope such as <c>MeshInfo</c> can be.
 /// </summary>
 public static class PropertyCatalog
 {
-    /// <summary>
-    /// One insertable property. <paramref name="ValidParents"/> is the set of element types this
-    /// property may be added to; an empty set means "any element type". <paramref name="Factory"/>
-    /// builds a fresh child <see cref="HudBlock"/> with default args.
-    /// </summary>
-    public sealed record PropertyDef(
-        string Name,
-        string Description,
-        IReadOnlySet<string> ValidParents,
-        Func<HudBlock> Factory);
-
-    private static readonly IReadOnlySet<string> Any = new HashSet<string>(StringComparer.Ordinal);
-    private static readonly IReadOnlySet<string> BitmapOnly = new HashSet<string>(StringComparer.Ordinal) { "Bitmap", "BarBitmap", "ProceduralBarBitmap" };
-    private static readonly IReadOnlySet<string> BarBitmapOnly = new HashSet<string>(StringComparer.Ordinal) { "BarBitmap" };
-    private static readonly IReadOnlySet<string> Model3DOnly = new HashSet<string>(StringComparer.Ordinal) { "Model3D" };
-    private static readonly IReadOnlySet<string> TextOnly = new HashSet<string>(StringComparer.Ordinal) { "Text" };
-    // Position/Rotation/Scale/Alpha/Color/ZOrder all apply to things that render. Group is a
-    // transform parent so it also benefits from these; BorderRect is included to keep parity
-    // with SWBF2's actual semantics (it's positionable).
-    private static readonly IReadOnlySet<string> RenderableOrGroup = new HashSet<string>(StringComparer.Ordinal)
+    /// <summary>One property, or sub-scope, that can be added, and the group the Add tab lists it under.</summary>
+    public sealed record PropertyDef(string Name, string Group, string Description, Func<HudBlock> Factory)
     {
-        "Group", "Bitmap", "BarBitmap", "ProceduralBarBitmap", "Model3D", "Text", "BorderRect",
+        /// <summary>A sub-scope (a block with a body) rather than a line.</summary>
+        public bool IsBlock { get; init; }
+
+        /// <summary>Whether a block may hold more than one, as <c>MeshInfo</c>.</summary>
+        public bool Repeatable { get; init; }
+
+        internal string Reader { get; init; } = "Element";
+    }
+
+    /// <summary>The Add tab's groups, in the order it lists them.</summary>
+    public static readonly IReadOnlyList<string> Groups = new[]
+    {
+        "Placement", "Look", "Show and hide", "Events", "Text", "Bitmap", "Bar", "Model", "Box and list", "Map",
+        "Target", "File", "GameExt", "Editor",
     };
 
-    /// <summary>
-    /// Alphabetical-ish property list — ordered roughly by how often a modder reaches for each.
-    /// Transform basics come first (Position, Rotation, Scale) because they're what the user's
-    /// usually adding when something renders in the wrong spot / at the wrong angle.
-    /// </summary>
-    public static readonly IReadOnlyList<PropertyDef> All = new List<PropertyDef>
+    private static readonly List<PropertyDef> All = new();
+
+    static PropertyCatalog()
     {
-        new("Position", "(X, Y, Z, mode): mode Pixels, Screen, Viewport or Frame. Left out, the game reads Pixels.",
-            RenderableOrGroup,
-            () => Leaf("Position", F(0.5), F(0.5), F(0.0), S("Viewport"))),
+        // ---- Element: every visible element (Element::ReadData, P 005F3E10) ----
+        Add("Element", "Placement", "Position", "(x, y, z, mode): where the element sits in its group. Mode Pixels, Screen, Viewport or Frame (a share of the group's Rect); left out, Pixels.",
+            () => Leaf("Position", F(0.5), F(0.5), F(0), S("Viewport")));
+        Add("Element", "Placement", "Rotation", "(x, y, z) in degrees, turned in that order.",
+            () => Leaf("Rotation", F(0), F(0), F(0)));
+        Add("Element", "Placement", "Scale", "(x, y, z): stretches the element and everything in it, after the rotation.",
+            () => Leaf("Scale", F(1), F(1), F(1)));
+        Add("Element", "Placement", "ZOrder", "0 to 255; a lower value draws on top. An element starts at 128, but a child's line moves it in front of its equals even at 128.",
+            () => Leaf("ZOrder", I(128)));
+        Add("Element", "Placement", "Viewport", "Which player's screen group, 0 to 4 (0 is every screen). Only a top-level element's counts; children follow their group.",
+            () => Leaf("Viewport", I(1)));
+        Add("Element", "Placement", "Scalable", "1: the element follows the HUD scale video option (ScriptCB_SetHUDScale), keeping its position.",
+            () => Leaf("Scalable", I(1)));
+        Add("Element", "Look", "Alpha", "Opacity, 0 to 1. A group's alpha reaches its children only with PropagateAlpha(1).",
+            () => Leaf("Alpha", F(1)));
+        Add("Element", "Look", "Color", "(r, g, b), 0 to 255: tints the element; a group's colour tints everything in it.",
+            () => Leaf("Color", I(255), I(255), I(255)));
+        Add("Element", "Look", "ColorChange", "(r, g, b): the colour a change flashes to (with UseChangeColor) and a pulse snaps to (with ColorPulseRate).",
+            () => Leaf("ColorChange", I(255), I(0), I(0)));
+        Add("Element", "Look", "ColorChangeRate", "Seconds the colour takes to ease back after a change or a new EventColor; 0.3 by default.",
+            () => Leaf("ColorChangeRate", F(0.3)));
+        Add("Element", "Look", "ColorPulseRate", "Seconds between pulses to ColorChange; off by default.",
+            () => Leaf("ColorPulseRate", F(1)));
+        Add("Element", "Look", "UseChangeColor", "1: the element flashes to ColorChange whenever its value, text, number or texture changes.",
+            () => Leaf("UseChangeColor", I(1)));
+        Add("Element", "Look", "BlendMode", "\"Additive\" (glow) or \"Alpha\", the default. On a group it reaches only the children read before it.",
+            () => Leaf("BlendMode", S("Additive")));
+        Add("Element", "Show and hide", "EventEnable", "Shows the element whenever this event is sent, whatever its value. Every element starts hidden.",
+            () => Leaf("EventEnable", S("initialize")));
+        Add("Element", "Show and hide", "EventDisable", "Hides the element whenever this event is sent. One line only: a second replaces the first.",
+            () => Leaf("EventDisable", S("player1.die")));
+        Add("Element", "Show and hide", "FadeInTime", "Seconds to fade in when enabled.",
+            () => Leaf("FadeInTime", F(0.25)));
+        Add("Element", "Show and hide", "FadeHoldTime", "Seconds to stay shown before fading out on its own; forever by default.",
+            () => Leaf("FadeHoldTime", F(2.5)));
+        Add("Element", "Show and hide", "FadeSustainTime", "Seconds a disable waits before the fade-out starts.",
+            () => Leaf("FadeSustainTime", F(0.5)));
+        Add("Element", "Show and hide", "FadeOutTime", "Seconds to fade out when disabled or when the hold ends.",
+            () => Leaf("FadeOutTime", F(1)));
+        Add("Element", "Show and hide", "EventFadeOut", "A new event this element sends when its fade-out starts, for others to react to.",
+            () => Leaf("EventFadeOut", S("myElement.fadeOut")));
+        Add("Element", "Events", "EventColor", "A Color event that sets the colour, eased over ColorChangeRate; its alpha is ignored.",
+            () => Leaf("EventColor", S("player1.message.color")));
+        Add("Element", "Events", "EventPulseRate", "A number event that sets the pulse period.",
+            () => Leaf("EventPulseRate", S("player1.healthRegenPulseRate")));
+        Add("Element", "Events", "EventChanged", "Any event that makes the element flash to ColorChange, as a change would.",
+            () => Leaf("EventChanged", S("player1.weapon1.target.hit")));
+        Add("Element", "GameExt", "ScreenAnchor", "GameExt, in an AuthoredRatio or TrueWidescreen file: which side of a wider screen a piece keeps to, \"Left\", \"Center\" or \"Right\", or a share from 0 to 1. Only a top-level piece, or a child of a plain container, moves.",
+            () => Leaf("ScreenAnchor", S("Right")));
+        Add("Element", "Editor", "EditOnly", "1: shown only in the game's own HUD editor.",
+            () => Leaf("EditOnly", I(1)));
 
-        new("Rotation", "(X, Y, Z) Euler angles in degrees. Y=180 flips a mesh horizontally.",
-            RenderableOrGroup,
-            () => Leaf("Rotation", F(0.0), F(0.0), F(0.0))),
+        // ---- Group base: Group, BarSegmented, MultilineText, BorderedBox, ObjectiveList, Map, Target, VehicleSeating ----
+        Add("GroupBase", "Placement", "Rect", "(w, h, h-align, v-align, mode): the group's box. Its alignment makes Position that corner or centre; \"Frame\" positions inside are shares of it; it sizes segmented bars, lists and boxes. Mode Pixels, Screen or Viewport.",
+            () => Leaf("Rect", F(0.2), F(0.1), S("Left"), S("Top"), S("Viewport")));
+        Add("GroupBase", "Look", "PropagateAlpha", "1: the group's alpha multiplies its children's. Colour always reaches them.",
+            () => Leaf("PropagateAlpha", I(1)));
+        Add("GroupBase", "Events", "EventPosition", "A Vector3 event that moves the group, read in its Rect's mode and aligned as the Rect says. The game sends screen fractions.",
+            () => Leaf("EventPosition", S("player1.weapon1.reticule.position")));
+        Add("GroupBase", "Events", "EventScale", "A Vector3 event giving the group's axis lengths; it replaces the authored Scale.",
+            () => Leaf("EventScale", S("player1.weapon1.chargeScale")));
+        Add("GroupBase", "Events", "EventRotation", "A Vector3 event in degrees that turns the group, keeping its scale.",
+            () => Leaf("EventRotation", S("player1.weapon1.chargeRotate")));
+        Add("GroupBase", "Events", "EventAlpha", "A Float event setting the group's alpha for one frame (modtools and Steam); GameExt's lerps with OutputIsAlpha(1) send it every frame.",
+            () => Leaf("EventAlpha", S("player1.example.alpha")));
+        Add("GroupPlayer", "Events", "EventPlayerIndex", "An Int event that points the element at player N.",
+            () => Leaf("EventPlayerIndex", S("player1.index")));
 
-        new("Scale", "(X, Y, Z) per-axis scale, applied after the rotation (along the parent's axes). 1 = no scaling.",
-            RenderableOrGroup,
-            () => Leaf("Scale", F(1.0), F(1.0), F(1.0))),
+        // ---- Text (ElementText::ReadData, P 0060C850); MultilineText's Format template reads these too ----
+        Add("Text", "Text", "Text", "A localization key; a key the localization lacks shows as itself.",
+            () => Leaf("Text", S("level.common.hud.example")));
+        Add("Text", "Text", "EventText", "A String event, or a Uint localization hash, that sets the text.",
+            () => Leaf("EventText", S("player1.message")));
+        Add("Text", "Text", "EventNumber", "A number event that sets the text, printed with IntegerFormat, FloatFormat, Percent or NumberToTime.",
+            () => Leaf("EventNumber", S("player1.weapon1.totalClipBullets")));
+        Add("Text", "Text", "TextFont", "The font: gamefont_super_tiny, _tiny, _small, _medium or _large, or a mod's own.",
+            () => Leaf("TextFont", S("gamefont_small")));
+        Add("Text", "Text", "TextBox", "(w, h) as shares of the view, made whole pixels: the box the text aligns, wraps and clips in, from the position.",
+            () => Leaf("TextBox", F(0.2), F(0.05)));
+        Add("Text", "Text", "TextScale", "(x, y): scales the glyphs and the line height.",
+            () => Leaf("TextScale", F(1), F(1)));
+        Add("Text", "Text", "TextAlignment", "(h, v): Left, Right or Center, and Top, Bottom, Center or Baseline, inside the box.",
+            () => Leaf("TextAlignment", S("Center"), S("Center")));
+        Add("Text", "Text", "TextBreak", "\"Word\" wraps at the box's right edge; \"No Reformat\" counts a run of spaces as one; \"None\" breaks only at line breaks. \"Word Reformat\" reads as Word.",
+            () => Leaf("TextBreak", S("Word")));
+        Add("Text", "Text", "TextClip", "\"Character\", the only value: a character that would pass the box is not drawn, nor the rest of its line. Always on.",
+            () => Leaf("TextClip", S("Character")));
+        Add("Text", "Text", "TextStyle", "\"Shadow\" adds a drop shadow; \"Normal\" or \"Selected\" otherwise.",
+            () => Leaf("TextStyle", S("Shadow")));
+        Add("Text", "Text", "TextCharacterSpacing", "Pixels added after each character; 1 by default.",
+            () => Leaf("TextCharacterSpacing", I(0)));
+        Add("Text", "Text", "TextTabSpacing", "Pixels between tab stops; eight spaces by default.",
+            () => Leaf("TextTabSpacing", I(32)));
+        Add("Text", "Text", "IntegerFormat", "The printf format for an Int or Uint EventNumber; %d by default.",
+            () => Leaf("IntegerFormat", S("%d")));
+        Add("Text", "Text", "FloatFormat", "The printf format for a Float EventNumber; %f by default.",
+            () => Leaf("FloatFormat", S("%.0f")));
+        Add("Text", "Text", "NumberToTime", "Prints a number of seconds as time: %d days, %h hours, %m minutes, %s seconds.",
+            () => Leaf("NumberToTime", S("%m:%02s")));
+        Add("Text", "Text", "Percent", "1: prints the number times 100 with a % sign; FloatFormat is ignored.",
+            () => Leaf("Percent", I(1)));
+        Add("Text", "Text", "InfiniteDashes", "1: an infinite number (0xFFFFFFFF, FLT_MAX) prints -- instead of nothing.",
+            () => Leaf("InfiniteDashes", I(1)));
 
-        new("Alpha", "0..1 opacity. Combine with PropagateAlpha(1) on a Group to fade a subtree.",
-            RenderableOrGroup,
-            () => Leaf("Alpha", F(1.0))),
+        // ---- Bitmaps (ElementBitmapBase::ReadData, P 005FA670): Bitmap, BitmapMasked, the bars, templates ----
+        Add("Bitmap", "Bitmap", "Bitmap", "The texture, by name without extension.",
+            () => Leaf("Bitmap", S("hud_texture")));
+        Add("Bitmap", "Bitmap", "BitmapRect", "(w, h, h-align, v-align, mode): the quad, its only size; the alignment makes the position that corner or centre. Mode Pixels, Screen or Viewport, read only with all five.",
+            () => Leaf("BitmapRect", F(0.1), F(0.1), S("Left"), S("Top"), S("Viewport")));
+        Add("Bitmap", "Bitmap", "TexCoords", "(u0, v0, u1, v1): the part of the texture drawn; swap a pair to flip it.",
+            () => Leaf("TexCoords", F(0), F(0), F(1), F(1)));
+        Add("Bitmap", "Bitmap", "BitmapStyle", "\"Shadow\" draws the shader's shadow; \"Normal\" by default.",
+            () => Leaf("BitmapStyle", S("Shadow")));
+        Add("Bitmap", "Bitmap", "EventBitmap", "A Texture event, or a Uint name hash, that swaps the texture.",
+            () => Leaf("EventBitmap", S("player1.team1.texture")));
+        Add("Masked", "Bitmap", "Mask", "BitmapMasked: the mask texture.",
+            () => Leaf("Mask", S("map_mask")));
+        Add("Masked", "Bitmap", "MaskTexCoords", "BitmapMasked: (u0, v0, u1, v1) of the mask.",
+            () => Leaf("MaskTexCoords", F(0), F(0), F(1), F(1)));
 
-        new("Color", "(R, G, B) tint — 0..255 per channel. White (255,255,255) = no tint.",
-            RenderableOrGroup,
-            () => Leaf("Color", I(255), I(255), I(255))),
+        // ---- Bars (ElementBar, P 005F6780): BarBitmap, ProceduralBarBitmap, BarSegmented ----
+        Add("Bar", "Bar", "EventValue", "A number event that sets the bar's value.",
+            () => Leaf("EventValue", S("player1.healthFraction")));
+        Add("Bar", "Bar", "Value", "The value the bar loads with; 1 by default. The stock setup leaves a bar full until its first event.",
+            () => Leaf("Value", F(1)));
+        Add("Bar", "Bar", "MinValue", "The value that empties the bar; 0 by default.",
+            () => Leaf("MinValue", F(0)));
+        Add("Bar", "Bar", "MaxValue", "The value that fills the bar; 1 by default.",
+            () => Leaf("MaxValue", F(100)));
+        Add("BarBitmap", "Bar", "ScaleTexture", "0: the texture is not cropped with the fill, so it squeezes instead; on by default.",
+            () => Leaf("ScaleTexture", I(0)));
+        Add("BarBitmap", "Bar", "ScaleSize", "0: the value does not move the bar's edge, so the whole quad stays; on by default.",
+            () => Leaf("ScaleSize", I(0)));
+        Add("BarBitmap", "Bar", "FlashyScale", "The height the change strip eases to during the first second of its fade.",
+            () => Leaf("FlashyScale", F(1)));
+        Add("BarBitmap", "Bar", "FlashyIncFadeOutTime", "Seconds the change strip fades over when the value grew.",
+            () => Leaf("FlashyIncFadeOutTime", F(1)));
+        Add("BarBitmap", "Bar", "FlashyDecFadeOutTime", "Seconds the change strip fades over when the value shrank.",
+            () => Leaf("FlashyDecFadeOutTime", F(1)));
+        Add("BarBitmap", "GameExt", "FillFrom", "GameExt: the end that stays put as the value changes: \"Left\" (stock), \"Right\", \"Bottom\" or \"Top\".",
+            () => Leaf("FillFrom", S("Right")));
+        Add("Procedural", "Bar", "GlowAlphaBase", "ProceduralBarBitmap: the flicker's lowest alpha share; 0.5.",
+            () => Leaf("GlowAlphaBase", F(0.5)));
+        Add("Procedural", "Bar", "GlowAlphaScale", "ProceduralBarBitmap: how much random flicker is added to the alpha; 1.",
+            () => Leaf("GlowAlphaScale", F(1)));
+        Add("Procedural", "Bar", "GlowScaleSize", "ProceduralBarBitmap: how much the glow's size flickers; 0.05.",
+            () => Leaf("GlowScaleSize", F(0.05)));
+        Add("Segmented", "Bar", "NumSegments", "BarSegmented: how many segments; a value lights a share of them.",
+            () => Leaf("NumSegments", I(10)));
+        Add("Segmented", "Bar", "Circular", "BarSegmented: 1 (default) sets segments on an ellipse inside the Rect from AngleStart to AngleEnd; 0 lays them in a row across it.",
+            () => Leaf("Circular", I(0)));
+        Add("Segmented", "Bar", "AngleStart", "BarSegmented: where the ring starts, in degrees.",
+            () => Leaf("AngleStart", F(-135)));
+        Add("Segmented", "Bar", "AngleEnd", "BarSegmented: where the ring ends, in degrees.",
+            () => Leaf("AngleEnd", F(135)));
+        Add("Segmented", "Bar", "Segment", "BarSegmented: the template every segment is copied from, a bitmap.",
+            () => Block("Segment", "Segment",
+                Leaf("Bitmap", S("white")),
+                Leaf("BitmapRect", F(4), F(8), S("Center"), S("Center"), S("Pixels"))),
+            isBlock: true);
 
-        new("ZOrder", "Draw order, 0 to 255: a lower value draws on top. Without the line an element sits at 128.",
-            RenderableOrGroup,
-            () => Leaf("ZOrder", I(0))),
+        // ---- Model3D (ElementModel3D::Read, P 00605C70) ----
+        Add("Model3D", "Model", "Mesh", "The model, by name.",
+            () => Leaf("Mesh", S("hud_model")));
+        Add("Model3D", "Model", "EventMesh", "A Model event, or a Uint name hash, that swaps the model; a TransformNameMesh usually sends it.",
+            () => Leaf("EventMesh", S("player1.weapon1.mesh")));
+        Add("Model3D", "Model", "Lighting", "0: the model is drawn unlit; lit by default.",
+            () => Leaf("Lighting", I(0)));
+        Add("Model3D", "Model", "Depth", "Scales the model's translation toward the camera; 0.01 by default.",
+            () => Leaf("Depth", F(0.01)));
+        Add("Model3D", "Model", "Hardpoint", "Draws the model through this bone's matrix.",
+            () => Leaf("Hardpoint", S("hp_bone")));
+        Add("Model3D", "Model", "InheritMeshInfo", "Shares an earlier Model3D's MeshInfo table, by that element's name.",
+            () => Leaf("InheritMeshInfo", S("player1weapon1model")));
+        Add("Model3D", "Model", "MeshInfo", "A model's own placement: while that model is shown, this block's position, rotation and scale replace the element's.",
+            () => Block("MeshInfo", "hud_model", Leaf("Position", F(0), F(0), F(0), S("Viewport"))),
+            isBlock: true, repeatable: true);
+        Add("MeshInfo", "Placement", "Position", "(x, y, z, mode): the model's position while it is shown.",
+            () => Leaf("Position", F(0), F(0), F(0), S("Viewport")));
+        Add("MeshInfo", "Placement", "Rotation", "(x, y, z) in degrees.",
+            () => Leaf("Rotation", F(0), F(0), F(0)));
+        Add("MeshInfo", "Placement", "Scale", "(x, y, z).",
+            () => Leaf("Scale", F(1), F(1), F(1)));
+        Add("MeshInfo", "Model", "Depth", "Replaces the element's Depth while this model is shown.",
+            () => Leaf("Depth", F(0.01)));
 
-        new("PropagateAlpha", "1 = multiply children's alpha by this group's. Colour always tints children.",
-            new HashSet<string>(StringComparer.Ordinal) { "Group" },
-            () => Leaf("PropagateAlpha", I(1))),
+        // ---- Lists and boxes ----
+        Add("Multiline", "Box and list", "EventText", "MultilineText: a String event that adds a line.",
+            () => Leaf("EventText", S("player1.message")));
+        Add("Multiline", "Box and list", "EventColor", "MultilineText: a Color event that sets the next line's colour and alpha.",
+            () => Leaf("EventColor", S("player1.message.color")));
+        Add("Multiline", "Box and list", "NumLines", "MultilineText: how many lines it shows.",
+            () => Leaf("NumLines", I(3)));
+        Add("Multiline", "Box and list", "DisplayTime", "MultilineText: seconds a line stays.",
+            () => Leaf("DisplayTime", F(3)));
+        Add("Multiline", "Box and list", "AlwaysScroll", "MultilineText: 1 scrolls lines away even before the box is full.",
+            () => Leaf("AlwaysScroll", I(1)));
+        Add("Multiline", "Box and list", "AddToTop", "MultilineText: 1 adds new lines at the top.",
+            () => Leaf("AddToTop", I(1)));
+        Add("Multiline", "Box and list", "DisableOnEmpty", "MultilineText: 1 hides the element while it has no lines.",
+            () => Leaf("DisableOnEmpty", I(1)));
+        Add("Multiline", "Box and list", "Format", "MultilineText: the template each line is laid out with, a text.",
+            () => Block("Format", "Format", Leaf("TextFont", S("gamefont_small"))),
+            isBlock: true);
+        Add("Bordered", "Box and list", "Background", "BorderedBox: the texture of its nine-slice box, which its Rect sizes.",
+            () => Leaf("Background", S("border_3_pieces")));
+        Add("Bordered", "Box and list", "Border", "BorderedBox: (w, h) of the border in texture pixels.",
+            () => Leaf("Border", F(2), F(2)));
 
-        new("Viewport", "Screen group 0 to 4 (a player's split-screen view; 0 is shared). Only a top-level element's counts.",
-            RenderableOrGroup,
-            () => Leaf("Viewport", I(1))),
+        // ---- Map (ElementMap::Read, P 006009E0) ----
+        Add("Map", "Map", "PositionSmall", "(x, y, z, mode): the minimap's place.", () => Leaf("PositionSmall", F(0.84), F(0.19), F(0), S("Viewport")));
+        Add("Map", "Map", "PositionLarge", "(x, y, z, mode): the full map's place.", () => Leaf("PositionLarge", F(0.31), F(0.56), F(0), S("Viewport")));
+        Add("Map", "Map", "PositionSpawn", "(x, y, z, mode): the spawn screen map's place.", () => Leaf("PositionSpawn", F(0.3), F(0.48), F(0), S("Viewport")));
+        Add("Map", "Map", "BackgroundMaskShapeSmall", "\"Circle\" or \"Rectangle\": the minimap's shape.", () => Leaf("BackgroundMaskShapeSmall", S("Circle")));
+        Add("Map", "Map", "BackgroundMaskShapeLarge", "\"Circle\" or \"Rectangle\": the full map's shape.", () => Leaf("BackgroundMaskShapeLarge", S("Rectangle")));
+        Add("Map", "Map", "BackgroundMaskShapeSpawn", "\"Circle\" or \"Rectangle\": the spawn map's shape.", () => Leaf("BackgroundMaskShapeSpawn", S("Rectangle")));
+        Add("Map", "Map", "AllowMiniMap", "1 allows the minimap mode.", () => Leaf("AllowMiniMap", I(1)));
+        Add("Map", "Map", "EventToggleMapMode", "The event that toggles the map's size.", () => Leaf("EventToggleMapMode", S("player1.map.modeToggle")));
+        Add("Map", "Map", "EventChangeMapMode", "An Int event that sets the map's mode.", () => Leaf("EventChangeMapMode", S("player1.map.mode")));
+        Add("Map", "Map", "EventPostHide", "The event that hides the command posts.", () => Leaf("EventPostHide", S("player1.map.hideCPs")));
+        Add("Map", "Map", "EventRefreshTarget", "The event that redraws the targets.", () => Leaf("EventRefreshTarget", S("player1.map.refreshTarget")));
+        Add("Map", "Map", "EventRefreshPost", "The event that redraws the posts.", () => Leaf("EventRefreshPost", S("player1.map.refreshPost")));
+        Add("Map", "Map", "EventRefreshMarker", "The event that redraws the markers.", () => Leaf("EventRefreshMarker", S("player1.map.refreshMarker")));
 
-        new("ScaleSize", "BarBitmap only. 1 (default) lets the value move the bar's edge; 0 keeps the whole quad.",
-            BarBitmapOnly,
-            () => Leaf("ScaleSize", I(0))),
+        // ---- Target (ElementTarget::Read, P 006098C0) and its templates ----
+        Add("Target", "Target", "FourSegmentLockOn", "1: the lock-on is drawn in four segments.", () => Leaf("FourSegmentLockOn", I(1)));
+        Add("Target", "Target", "EventResetTargetCommon", "The event that clears the shared targets.", () => Leaf("EventResetTargetCommon", S("targetResetCommon")));
+        Add("Target", "Target", "EventResetTargetPlayer", "The event that clears this player's targets.", () => Leaf("EventResetTargetPlayer", S("player1.targetResetPlayer")));
+        Add("TargetTemplate", "Target", "MinScale", "The template's scale at the near end of the target's distance range.", () => Leaf("MinScale", F(1)));
+        Add("TargetTemplate", "Target", "MaxScale", "The template's scale at the far end of the range.", () => Leaf("MaxScale", F(0.5)));
+        Add("TargetTemplate", "Target", "ColorFriendly", "(r, g, b) for a friendly target. An Alpha that rounds to 0 switches the template to team colour.", () => Leaf("ColorFriendly", I(0), I(0), I(255)));
 
-        new("BitmapRect", "(W, H, h-align, v-align, mode): the quad around the position. Its only size: the texture never sizes it.",
-            BitmapOnly,
-            () => Leaf("BitmapRect", F(0.1), F(0.1), S("Left"), S("Top"), S("Viewport"))),
+        // ---- The templates of Map and VehicleSeating: the keys the stock templates use ----
+        Add("CodeTemplate", "Bitmap", "Bitmap", "The texture, by name.", () => Leaf("Bitmap", S("hud_texture")));
+        Add("CodeTemplate", "Bitmap", "TexCoords", "(u0, v0, u1, v1) of the texture.", () => Leaf("TexCoords", F(0), F(0), F(1), F(1)));
+        Add("CodeTemplate", "Bitmap", "BitmapStyle", "\"Shadow\" or \"Normal\".", () => Leaf("BitmapStyle", S("Shadow")));
+        Add("CodeTemplate", "Bitmap", "Mask", "The mask texture, as the map's backdrops use.", () => Leaf("Mask", S("map_mask")));
+        Add("CodeTemplate", "Model", "Mesh", "The model, by name.", () => Leaf("Mesh", S("hud_model")));
+        Add("CodeTemplate", "Text", "TextFont", "The font of a text template.", () => Leaf("TextFont", S("gamefont_small")));
+        Add("CodeTemplate", "Text", "TextBreak", "\"Word\", \"No Reformat\" or \"None\".", () => Leaf("TextBreak", S("None")));
+        Add("CodeTemplate", "Text", "TextAlignment", "(h, v) of a text template.", () => Leaf("TextAlignment", S("Center"), S("Center")));
+        Add("CodeTemplate", "Text", "TextStyle", "\"Shadow\", \"Normal\" or \"Selected\".", () => Leaf("TextStyle", S("Shadow")));
 
-        new("TexCoords", "(u1, v1, u2, v2) — sub-rectangle of the source texture to sample from.",
-            BitmapOnly,
-            () => Leaf("TexCoords", F(0.0), F(0.0), F(1.0), F(1.0))),
+        // ---- Not elements: FileInfo and ViewPort ----
+        Add("FileInfo", "File", "Viewports", "The split-screen view counts the file is for, such as (1) or (1, 2, 3, 4).", () => Leaf("Viewports", I(1)));
+        Add("FileInfo", "GameExt", "AuthoredRatio", "GameExt: (w, h), the screen shape the file was made for, such as (16, 9). The file is laid out at its real height and slid across a wider screen.", () => Leaf("AuthoredRatio", I(16), I(9)));
+        Add("FileInfo", "GameExt", "TrueWidescreen", "GameExt: 1 lays a 4:3 file out at its real height on a wider screen; AuthoredRatio for other shapes.", () => Leaf("TrueWidescreen", I(1)));
+        Add("ViewPort", "File", "EventNameFilter", "Reads the block again for each player's camera, swapping % in event names for the player's number.", () => Leaf("EventNameFilter", S("player%")));
+    }
 
-        new("BlendMode", "\"Additive\" or \"Alpha\" (default). Additive = glow.",
-            BitmapOnly,
-            () => Leaf("BlendMode", S("Additive"))),
-
-        new("TextBox", "(W, H) as fractions of the view, whole pixels; text aligns inside it from the position.",
-            TextOnly,
-            () => Leaf("TextBox", F(0.2), F(0.05))),
-
-        new("TextFont", "Font name — gamefont_tiny/small/medium/big/large.",
-            TextOnly,
-            () => Leaf("TextFont", S("gamefont_small"))),
-
-        new("TextScale", "(X, Y) font size multiplier.",
-            TextOnly,
-            () => Leaf("TextScale", F(1.0), F(1.0))),
-
-        new("TextAlignment", "(h, v): Left/Right/Center and Top/Bottom/Center/Baseline.",
-            TextOnly,
-            () => Leaf("TextAlignment", S("Center"), S("Center"))),
-
-        new("TextStyle", "\"Shadow\" adds a drop shadow. Omit for plain.",
-            TextOnly,
-            () => Leaf("TextStyle", S("Shadow"))),
-
-        new("Mesh", "Reference a mesh by name (no extension). Model3D/Bitmap.",
-            new HashSet<string>(StringComparer.Ordinal) { "Model3D", "Bitmap" },
-            () => Leaf("Mesh", S("hud_infinite_ammo_icon"))),
-
-        new("EventEnable", "Event name that toggles this element's visibility at runtime.",
-            Any,
-            () => Leaf("EventEnable", S("initialize"))),
-
-        new("EventValue", "BarBitmap/ProceduralBarBitmap: event providing the 0..1 fill fraction.",
-            new HashSet<string>(StringComparer.Ordinal) { "BarBitmap", "ProceduralBarBitmap" },
-            () => Leaf("EventValue", S("player1.healthFraction"))),
-
-        new("EventMesh", "Model3D: event selecting which mesh to render.",
-            Model3DOnly,
-            () => Leaf("EventMesh", S("player1.weapon"))),
-
-        new("EventColor", "Event providing an RGB color override.",
-            Any,
-            () => Leaf("EventColor", S("player1.teamColor"))),
-
-        new("EventAlpha", "Event providing a 0..1 alpha value.",
-            Any,
-            () => Leaf("EventAlpha", S("player1.lowHealth"))),
-    };
+    private static void Add(string reader, string group, string name, string description, Func<HudBlock> factory,
+        bool isBlock = false, bool repeatable = false) =>
+        All.Add(new PropertyDef(name, group, description, factory) { Reader = reader, IsBlock = isBlock, Repeatable = repeatable });
 
     /// <summary>
-    /// Filter the catalog to properties that (a) can be legally added to a block of the given
-    /// type and (b) aren't already present as a child. Result is ready-to-display.
+    /// What can be added to <paramref name="target"/>, in the Add tab's order: what its class reads
+    /// (its parent tells a template's class), less the lines it already has.
     /// </summary>
-    public static IEnumerable<PropertyDef> GetAddable(HudBlock target)
+    public static IEnumerable<PropertyDef> GetAddable(HudBlock target, HudBlock? parent = null)
     {
-        var presentNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var c in target.Children)
-            if (!c.HasBody) presentNames.Add(c.Name);
+        var readers = ReadersOf(target, parent);
+        // Keys hash without case in the game.
+        var lines = new HashSet<string>(target.Children.Where(c => !c.HasBody).Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+        var blocks = new HashSet<string>(target.Children.Where(c => c.HasBody).Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+        // A key two classes read (EventText, EventColor) is offered once: as the subclass, which reads it first, has it.
+        var chosen = All
+            .Where(d => readers.Contains(d.Reader))
+            .Where(d => d.IsBlock ? d.Repeatable || !blocks.Contains(d.Name) : !lines.Contains(d.Name))
+            .GroupBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderBy(d => readers.IndexOf(d.Reader)).First())
+            .ToHashSet();
+        foreach (var group in Groups)
+            foreach (var def in All)
+                if (def.Group == group && chosen.Contains(def)) yield return def;
+    }
 
-        foreach (var def in All)
+    /// <summary>The classes whose ReadData reads a block's lines, the subclass first.</summary>
+    private static List<string> ReadersOf(HudBlock target, HudBlock? parent)
+    {
+        var readers = new List<string>();
+        if (ElementKinds.TryGet(target, out var kind))
         {
-            if (def.ValidParents.Count > 0 && !def.ValidParents.Contains(target.Name)) continue;
-            if (presentNames.Contains(def.Name)) continue;
-            yield return def;
+            // The subclass's own keys first: MultilineText's EventText and EventColor replace Element's.
+            switch (kind)
+            {
+                case ElementKind.Text:
+                    readers.Add("Text");
+                    break;
+                case ElementKind.Bitmap:
+                    readers.Add("Bitmap");
+                    break;
+                case ElementKind.BitmapMasked:
+                    readers.AddRange(new[] { "Masked", "Bitmap" });
+                    break;
+                case ElementKind.BarBitmap:
+                    readers.AddRange(new[] { "BarBitmap", "Bar", "Bitmap" });
+                    break;
+                case ElementKind.ProceduralBarBitmap:
+                    readers.AddRange(new[] { "Procedural", "BarBitmap", "Bar", "Bitmap" });
+                    break;
+                case ElementKind.BarSegmented:
+                    readers.AddRange(new[] { "Segmented", "Bar", "GroupBase" });
+                    break;
+                case ElementKind.Model3D:
+                    readers.Add("Model3D");
+                    break;
+                case ElementKind.MultilineText:
+                    readers.AddRange(new[] { "Multiline", "GroupBase" });
+                    break;
+                case ElementKind.BorderedBox:
+                    readers.AddRange(new[] { "Bordered", "GroupBase" });
+                    break;
+                case ElementKind.Map:
+                    readers.AddRange(new[] { "Map", "GroupPlayer", "GroupBase" });
+                    break;
+                case ElementKind.Target:
+                    readers.AddRange(new[] { "Target", "GroupPlayer", "GroupBase" });
+                    break;
+                case ElementKind.VehicleSeating:
+                    readers.AddRange(new[] { "GroupPlayer", "GroupBase" });
+                    break;
+                default:
+                    readers.Add("GroupBase");
+                    break;
+            }
+            readers.Add("Element");
+            return readers;
         }
+        if (!target.HasBody) return readers;
+
+        if (target.Name == "FileInfo") readers.Add("FileInfo");
+        else if (target.Name.Equals("ViewPort", StringComparison.OrdinalIgnoreCase)) readers.Add("ViewPort");
+        else if (parent is not null && ElementKinds.TryGet(parent, out var parentKind))
+        {
+            switch (parentKind)
+            {
+                case ElementKind.Model3D when target.Name == "MeshInfo":
+                    readers.Add("MeshInfo");
+                    break;
+                case ElementKind.BarSegmented when target.Name == "Segment":
+                    readers.AddRange(new[] { "Bitmap", "Element" });
+                    break;
+                case ElementKind.MultilineText when target.Name == "Format":
+                    readers.AddRange(new[] { "Text", "Element" });
+                    break;
+                case ElementKind.Target:
+                    readers.AddRange(new[] { "TargetTemplate", "Bitmap", "Element" });
+                    break;
+                case ElementKind.Map:
+                case ElementKind.VehicleSeating:
+                    readers.AddRange(new[] { "CodeTemplate", "Element" });
+                    break;
+            }
+        }
+        return readers;
     }
 
     private static HudBlock Leaf(string name, params HudArgument[] args)
     {
         var b = new HudBlock { Name = name, HasBody = false };
         foreach (var a in args) b.Arguments.Add(a);
+        return b;
+    }
+
+    private static HudBlock Block(string name, string argument, params HudBlock[] children)
+    {
+        var b = new HudBlock { Name = name, HasBody = true };
+        b.Arguments.Add(S(argument));
+        foreach (var c in children) b.Children.Add(c);
         return b;
     }
 

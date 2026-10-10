@@ -39,6 +39,7 @@ public partial class HudCanvas : UserControl
     private TextureCache? _textures;
     private TextFonts _fonts = new(null);
     private TextPreview _textPreview = TextPreview.Examples;
+    private BitmapSource? _reference;
     private MeshRenderer? _meshRenderer;
     private LocalizationTable? _localization;
     private HudTransformGraph? _graph;
@@ -132,6 +133,48 @@ public partial class HudCanvas : UserControl
             TextPreviewCombo.SelectedIndex = (int)value;
         }
     }
+
+    /// <summary>
+    /// An image to lay the HUD over, such as a screenshot of the game or a mock-up, stretched across
+    /// the screen; null for none. Editor-only: it is never saved into a file.
+    /// </summary>
+    public BitmapSource? ReferenceImage
+    {
+        get => _reference;
+        set
+        {
+            _reference = value;
+            _ready = false;
+            ReferenceBox.IsEnabled = value is not null;
+            ReferenceBox.IsChecked = value is not null;
+            _ready = true;
+            Render();
+        }
+    }
+
+    /// <summary>The reference image's opacity, 0.1 to 1.</summary>
+    public double ReferenceOpacity
+    {
+        get => ReferenceOpacitySlider.Value;
+        set => ReferenceOpacitySlider.Value = Math.Clamp(value, ReferenceOpacitySlider.Minimum, ReferenceOpacitySlider.Maximum);
+    }
+
+    /// <summary>Whether the reference image is drawn over the HUD rather than under it.</summary>
+    public bool ReferenceOnTop
+    {
+        get => ReferenceOnTopBox.IsChecked == true;
+        set => ReferenceOnTopBox.IsChecked = value;
+    }
+
+    /// <summary>Whether the reference image is shown at all.</summary>
+    public bool ReferenceShown
+    {
+        get => ReferenceBox.IsChecked == true;
+        set => ReferenceBox.IsChecked = value && _reference is not null;
+    }
+
+    /// <summary>Fires when the reference image's opacity or place changes, for the host to remember.</summary>
+    public event EventHandler? ReferenceSettingsChanged;
 
     /// <summary>Editor-only: whether a file's elements are drawn. Null draws every file.</summary>
     public Func<HudDocument, bool>? DocumentVisible { get; set; }
@@ -284,6 +327,7 @@ public partial class HudCanvas : UserControl
         if (described.Document is null) described = withElements.Count > 0 ? withElements[0] : _layout.Files[0];
         var line = Describe(_layout.Options, described.Layout);
         LayoutInfoText.Text = withElements.Count > 1 ? $"{FileName(described.Document)}: {line}" : line;
+        DrawReference();
         LayoutInfoText.ToolTip = withElements.Count > 1
             ? string.Join("\n", withElements.Select(f => $"{FileName(f.Document)}: {Describe(_layout.Options, f.Layout)}"))
             : null;
@@ -666,6 +710,31 @@ public partial class HudCanvas : UserControl
         }
     }
 
+    /// <summary>The reference image across the screen, under the HUD (above the guides) or over it.</summary>
+    private void DrawReference()
+    {
+        if (_reference is null || ReferenceBox.IsChecked != true) return;
+        var image = new Image
+        {
+            Source = _reference,
+            Width = _screen.Width,
+            Height = _screen.Height,
+            Stretch = Stretch.Fill,
+            Opacity = ReferenceOpacitySlider.Value,
+            IsHitTestVisible = false,
+        };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
+        Panel.SetZIndex(image, ReferenceOnTopBox.IsChecked == true ? int.MaxValue - 1 : int.MinValue + 1);
+        CanvasSurface.Children.Add(image);
+    }
+
+    private void ReferenceSlider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!_ready) return;
+        Render();
+        ReferenceSettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private void AddLine(double x0, double y0, double x1, double y1, Brush brush, bool dashed)
     {
         var line = new Line { X1 = x0, Y1 = y0, X2 = x1, Y2 = y1, Stroke = brush, StrokeThickness = 1, IsHitTestVisible = false };
@@ -1024,7 +1093,12 @@ public partial class HudCanvas : UserControl
         Render();
     }
 
-    private void Option_Changed(object sender, RoutedEventArgs e) => Render();
+    private void Option_Changed(object sender, RoutedEventArgs e)
+    {
+        Render();
+        if (_ready && (ReferenceEquals(sender, ReferenceBox) || ReferenceEquals(sender, ReferenceOnTopBox)))
+            ReferenceSettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     private void TextPreviewCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

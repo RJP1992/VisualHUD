@@ -63,6 +63,9 @@
                 <MenuItem Header="Re_move file from HUD" Click="RemoveFile_Click"
                           ToolTip="Take the selection's file out of the HUD. The file on disk is not changed." />
                 <Separator />
+                <MenuItem Header="Load reference _image..." Click="LoadReference_Click"
+                          ToolTip="Lay an image under the HUD, such as a screenshot of the game or a mock-up, stretched across the screen. It is never saved into a .hud file, and is remembered for next time." />
+                <MenuItem Header="Clear reference image" Click="ClearReference_Click" />
                 <MenuItem Header="Add asset _folder..." Click="AddAssetFolder_Click"
                           ToolTip="Search a folder and all its subfolders for the textures, meshes, fonts and localization the HUD's own folders and the stock ones do not have. Remembered for next time." />
                 <Separator />

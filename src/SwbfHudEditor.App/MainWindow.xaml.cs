@@ -5,6 +5,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using SwbfHudEditor.App.Views;
 using SwbfHudEditor.Core.Assets;
@@ -58,6 +60,7 @@ public partial class MainWindow : Window
         Tree.ItemsSource = _files;
         Canvas.DocumentVisible = doc => FileOf(doc)?.IsVisible ?? true;
         Properties.IsDefaultLine = line => (_defaultLines ??= FindDefaultLines()).Contains(line);
+        Properties.ParentOf = block => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
         _undo.Changed += (_, _) =>
         {
             _defaultLines = null;
@@ -84,6 +87,75 @@ public partial class MainWindow : Window
         };
         ShowAssetFolders();
         foreach (var folder in SearchedAssetFolders()) ScanAssetFolder(folder, report: false);
+
+        if (_settings.ReferenceImage is { } reference && File.Exists(reference)) LoadReference(reference, quiet: true);
+        Canvas.ReferenceSettingsChanged += (_, _) =>
+        {
+            _settings.ReferenceOpacity = Canvas.ReferenceOpacity;
+            _settings.ReferenceOnTop = Canvas.ReferenceOnTop;
+            _settings.ReferenceShown = Canvas.ReferenceShown;
+            _settings.Save();
+        };
+    }
+
+    // ── Reference image ──────────────────────────────────────────────────────────────
+
+    private void LoadReference_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Load a reference image",
+            Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga)|*.png;*.jpg;*.jpeg;*.bmp;*.tga|All files (*.*)|*.*",
+            InitialDirectory = Path.GetDirectoryName(_settings.ReferenceImage) is { } last && Directory.Exists(last) ? last : StartFolder(),
+        };
+        if (dialog.ShowDialog(this) == true) LoadReference(dialog.FileName, quiet: false);
+    }
+
+    private void ClearReference_Click(object sender, RoutedEventArgs e)
+    {
+        Canvas.ReferenceImage = null;
+        _settings.ReferenceImage = null;
+        _settings.Save();
+        StatusText.Text = "Reference image cleared.";
+    }
+
+    /// <summary>Read an image file and lay it under the HUD; the file is not kept open.</summary>
+    private void LoadReference(string path, bool quiet)
+    {
+        BitmapSource image;
+        try { image = ReadImage(path); }
+        catch (Exception ex)
+        {
+            if (!quiet) MessageBox.Show(this, $"{path}\n\n{ex.Message}", "Could not load the image", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        Canvas.ReferenceImage = image;
+        Canvas.ReferenceOpacity = _settings.ReferenceOpacity;
+        Canvas.ReferenceOnTop = _settings.ReferenceOnTop;
+        Canvas.ReferenceShown = quiet ? _settings.ReferenceShown : true;
+        _settings.ReferenceImage = path;
+        _settings.ReferenceShown = Canvas.ReferenceShown;
+        _settings.Save();
+        if (!quiet) StatusText.Text = $"Reference image: {path} ({image.PixelWidth}×{image.PixelHeight}), stretched across the screen.";
+    }
+
+    /// <summary>A PNG, JPEG or BMP through WPF, a TGA through the texture loader.</summary>
+    internal static BitmapSource ReadImage(string path)
+    {
+        if (path.EndsWith(".tga", StringComparison.OrdinalIgnoreCase))
+        {
+            var tga = TgaLoader.Load(path);
+            var source = BitmapSource.Create(tga.Width, tga.Height, 96, 96, PixelFormats.Bgra32, null, tga.Bgra32Data, tga.Width * 4);
+            source.Freeze();
+            return source;
+        }
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.UriSource = new Uri(path);
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     private IReadOnlyList<HudDocument> Documents => _files.Select(f => f.Document).ToList();
@@ -671,13 +743,15 @@ public partial class MainWindow : Window
         var target = e.Target;
         // Index = last leaf child + 1, so Rotation/Scale/etc land next to Position instead of
         // getting dumped at the very end after every nested Group. If there are no children yet,
-        // insert at 0.
+        // insert at 0. A block, such as a MeshInfo, goes at the end.
         var insertAt = 0;
-        for (var i = 0; i < target.Children.Count; i++)
-        {
-            if (!target.Children[i].HasBody) insertAt = i + 1;
-            else break;
-        }
+        if (e.Property.HasBody) insertAt = target.Children.Count;
+        else
+            for (var i = 0; i < target.Children.Count; i++)
+            {
+                if (!target.Children[i].HasBody) insertAt = i + 1;
+                else break;
+            }
         target.Children.Insert(insertAt, e.Property);
         var edit = new InsertBlockEdit(target.Children, insertAt, e.Property,
             $"add {e.Property.Name} to {target.Name}", affected: target);

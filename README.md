@@ -94,9 +94,18 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
   file GameExt lays out, the thirds of its layout and where each lands.
 - **HUD scale** resizes `Scalable(1)` elements, as the game's video option does.
 - **Model size** tunes the estimated size of `Model3D` meshes.
+- **Reference** shows an image loaded with **File > Load reference image** (PNG, JPEG, BMP
+  or TGA), such as a screenshot or a mock-up, stretched across the screen under the HUD, or
+  **On top** of it, at the slider's opacity. It is remembered between sessions and never
+  saved into a `.hud` file, so a HUD needs no reference element of its own.
 
 Dragging an element changes its last `Position` line, in that line's own mode, through
 the inverse of the matrix the game draws it with.
+
+The Properties panel's **Add** tab offers every key the game reads for the selected block, by
+the class that reads it (an element's own, its group base, every element's) and GameExt's,
+grouped and with a filter. A template such as `MeshInfo`, `Segment` or a Target template gets
+what its element reads in it.
 
 ## Text
 

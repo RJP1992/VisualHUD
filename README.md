@@ -178,6 +178,10 @@ one's for the same key.
   them all, in one undo step. An edge or the centre of what is dragged snaps to the edges and
   centres of the other elements drawn and to the screen's edges and centre lines, shown by a
   pink line; hold **Alt** not to snap, and **Shift** to keep to one axis.
+- The element with the cross shows **handles** on its quad, a group's `Rect` or a Text's `TextBox`:
+  dragging one resizes it, writing the size in the line's own unit, with its `Position` moved
+  so the edges not dragged stay and, for a group, what it holds staying where it is. **Shift**
+  keeps its shape; the edges dragged snap as a move does (**Alt** not). One undo step.
 - **Arrange** (the Edit menu, and the tree's and the canvas's right-click menus) lines the
   selection up as it is drawn: align left, centres, right, top, middles or bottom (one element
   with the screen, several with the box round them all); space out across or down, with the

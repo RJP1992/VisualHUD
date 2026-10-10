@@ -1201,6 +1201,7 @@ public partial class HudCanvas : UserControl
     {
         foreach (var h in _highlight) CanvasSurface.Children.Remove(h);
         _highlight.Clear();
+        _handles.Clear();
         foreach (var block in _selection) DrawHighlight(block, ReferenceEquals(block, _currentSelection));
         if (_currentSelection is { } current && !_selection.Contains(current)) DrawHighlight(current, true);
     }
@@ -1240,6 +1241,7 @@ public partial class HudCanvas : UserControl
             IsHitTestVisible = false,
         };
         AddHighlight(cross);
+        DrawHandles(e);
     }
 
     private void AddHighlight(FrameworkElement visual)
@@ -1422,6 +1424,11 @@ public partial class HudCanvas : UserControl
 
     private void Canvas_MouseMove(object sender, MouseEventArgs e)
     {
+        if (_resize is not null && CanvasSurface.IsMouseCaptured)
+        {
+            ResizeTo(e.GetPosition(CanvasSurface), Keyboard.Modifiers);
+            return;
+        }
         if (_dragBlock is null || !CanvasSurface.IsMouseCaptured) return;
         var current = e.GetPosition(CanvasSurface);
         var dx = current.X - _dragStartMouse.X;
@@ -1485,19 +1492,7 @@ public partial class HudCanvas : UserControl
         var moving = _dragBlocks.Select(b => _layout?.Find(b)).OfType<LaidOutElement>().ToList();
         _dragStartBounds = Rect.Empty;
         foreach (var m in moving) _dragStartBounds.Union(ScreenBounds(m));
-        _snapXs.Clear();
-        _snapYs.Clear();
-        _snapXs.AddRange(new[] { 0, _screen.Width / 2.0, _screen.Width });
-        _snapYs.AddRange(new[] { 0, _screen.Height / 2.0, _screen.Height });
-        if (_layout is null) return;
-        foreach (var other in _layout.All)
-        {
-            if (!_visuals.ContainsKey(other.Block) || moving.Any(m => ReferenceEquals(m, other) || IsInside(other, m))) continue;
-            var b = ScreenBounds(other);
-            if (b.IsEmpty) continue;
-            _snapXs.AddRange(new[] { b.Left, b.Left + b.Width / 2, b.Right });
-            _snapYs.AddRange(new[] { b.Top, b.Top + b.Height / 2, b.Bottom });
-        }
+        BuildSnapLines(moving);
     }
 
     /// <summary>
@@ -1602,6 +1597,11 @@ public partial class HudCanvas : UserControl
     private void Canvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (CanvasSurface.IsMouseCaptured) CanvasSurface.ReleaseMouseCapture();
+        if (_resize is not null)
+        {
+            EndResize();
+            return;
+        }
         if (_isDragging)
         {
             EndDrag();

@@ -1,3 +1,7 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using SwbfHudEditor.Core.Events;
 using SwbfHudEditor.Core.Hud;
 
@@ -56,6 +60,29 @@ public class CanvasTests
 
             w.Canvas.Refresh();
             Assert.NotSame(label, w.Canvas.VisualOf(Named(w, "label")));
+        });
+    }
+
+    [Fact]
+    public void A_Wipe_Shows_The_Reference_Left_Of_Its_Divider()
+    {
+        UiThread.WithWindow(Hud, (w, _) =>
+        {
+            var pixels = new byte[64 * 36 * 4];
+            w.Canvas.ReferenceImage = BitmapSource.Create(64, 36, 96, 96, PixelFormats.Bgra32, null, pixels, 64 * 4);
+            w.Canvas.ReferenceShown = true;
+            w.Canvas.ReferenceWipeBox.IsChecked = true;
+            UiThread.Settle();
+            var surface = w.Canvas.CanvasSurface;
+            var image = surface.Children.OfType<Image>().Single();
+            var width = image.Width;
+            Assert.Equal(new Rect(0, 0, width / 2, image.Height), ((RectangleGeometry)image.Clip).Rect);
+            var divider = surface.Children.OfType<Grid>().Single(g => g.Cursor == System.Windows.Input.Cursors.SizeWE);
+            Assert.Equal(width / 2 - divider.Width / 2, Canvas.GetLeft(divider));
+
+            w.Canvas.ReferenceWipeBox.IsChecked = false;
+            UiThread.Settle();
+            Assert.Null(surface.Children.OfType<Image>().Single().Clip);
         });
     }
 }

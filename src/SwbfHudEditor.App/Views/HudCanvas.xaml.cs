@@ -931,7 +931,10 @@ public partial class HudCanvas : UserControl
     /// <summary>The reference image across the screen, under the HUD (above the guides) or over it.</summary>
     private void DrawReference()
     {
+        _referenceImage = null;
+        _wipeHandle = null;
         if (_reference is null || ReferenceBox.IsChecked != true) return;
+        var wipe = ReferenceWipeBox.IsChecked == true;
         var image = new Image
         {
             Source = _reference,
@@ -942,8 +945,59 @@ public partial class HudCanvas : UserControl
             IsHitTestVisible = false,
         };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
-        Panel.SetZIndex(image, ReferenceOnTopBox.IsChecked == true ? int.MaxValue - 1 : int.MinValue + 1);
+        Panel.SetZIndex(image, wipe || ReferenceOnTopBox.IsChecked == true ? int.MaxValue - 1 : int.MinValue + 1);
         CanvasSurface.Children.Add(image);
+        _referenceImage = image;
+        if (!wipe) return;
+
+        // The divider: a line the height of the screen, with a wider strip to grab it by.
+        var handle = new Grid { Width = 14, Height = _screen.Height, Background = Brushes.Transparent, Cursor = Cursors.SizeWE };
+        handle.Children.Add(new Rectangle { Width = 2, Fill = (Brush)FindResource("AccentBrush"), HorizontalAlignment = HorizontalAlignment.Center });
+        handle.Children.Add(new Ellipse
+        {
+            Width = 14,
+            Height = 14,
+            Fill = (Brush)FindResource("AccentBrush"),
+            Stroke = Brushes.White,
+            StrokeThickness = 1.5,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        ToolTipService.SetToolTip(handle, "Drag to move the divider: the reference image left of it, the HUD right of it.");
+        handle.MouseLeftButtonDown += (_, e) =>
+        {
+            handle.CaptureMouse();
+            e.Handled = true;
+        };
+        handle.MouseMove += (_, e) =>
+        {
+            if (!handle.IsMouseCaptured) return;
+            _wipe = Math.Clamp(e.GetPosition(CanvasSurface).X / Math.Max(1, _screen.Width), 0, 1);
+            PlaceWipe();
+        };
+        handle.MouseLeftButtonUp += (_, e) =>
+        {
+            handle.ReleaseMouseCapture();
+            e.Handled = true;
+        };
+        Panel.SetZIndex(handle, int.MaxValue);
+        CanvasSurface.Children.Add(handle);
+        _wipeHandle = handle;
+        PlaceWipe();
+    }
+
+    /// <summary>How much of the width the reference covers in a wipe, from the left.</summary>
+    private double _wipe = 0.5;
+    private Image? _referenceImage;
+    private FrameworkElement? _wipeHandle;
+
+    /// <summary>The divider and the reference's clip, moved without drawing the HUD again.</summary>
+    private void PlaceWipe()
+    {
+        if (_referenceImage is null || _wipeHandle is null) return;
+        var x = _wipe * _screen.Width;
+        _referenceImage.Clip = new RectangleGeometry(new Rect(0, 0, x, _screen.Height));
+        Canvas.SetLeft(_wipeHandle, x - _wipeHandle.Width / 2);
+        Canvas.SetTop(_wipeHandle, 0);
     }
 
     private void ReferenceSlider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)

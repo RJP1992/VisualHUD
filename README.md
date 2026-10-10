@@ -116,8 +116,10 @@ one's for the same key.
   `MeshInfo` places only a mesh its event sends. See [docs/Engine.md](docs/Engine.md#models).
 - **Reference** shows an image loaded with **File > Load reference image** (PNG, JPEG, BMP
   or TGA), such as a screenshot or a mock-up, stretched across the screen under the HUD, or
-  **On top** of it, at the slider's opacity. It is remembered between sessions and never
-  saved into a `.hud` file, so a HUD needs no reference element of its own.
+  **On top** of it, at the slider's opacity. **Wipe** draws it over the HUD left of a divider
+  you drag across the screen, to check an in-game screenshot edge for edge. It is remembered
+  between sessions and never saved into a `.hud` file, so a HUD needs no reference element of
+  its own.
 - Ctrl+wheel zooms at the mouse, Shift+wheel scrolls sideways, and the middle button drags the
   view. The buttons on the right zoom, fit the screen in the view, or show it at one pixel per
   pixel.

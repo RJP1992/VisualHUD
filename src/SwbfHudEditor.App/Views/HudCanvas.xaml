@@ -75,9 +75,12 @@
                     <Slider x:Name="ReferenceOpacitySlider" Minimum="0.1" Maximum="1.0" Value="0.5" Width="64" VerticalAlignment="Center" Margin="0,2,6,2"
                             IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" ValueChanged="ReferenceSlider_Changed"
                             ToolTip="The reference image's opacity." />
-                    <CheckBox x:Name="ReferenceOnTopBox" Content="On top" Style="{StaticResource Chip}" Margin="0,2,14,2"
+                    <CheckBox x:Name="ReferenceOnTopBox" Content="On top" Style="{StaticResource Chip}" Margin="0,2,4,2"
                               IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" Checked="Option_Changed" Unchecked="Option_Changed"
                               ToolTip="Draw the reference image over the HUD instead of under it, to compare edges." />
+                    <CheckBox x:Name="ReferenceWipeBox" Content="Wipe" Style="{StaticResource Chip}" Margin="0,2,14,2"
+                              IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Draw the reference image over the HUD left of a divider, and the HUD right of it: drag the divider across to compare edges." />
 
                     <!-- Rarely changed: in a popup. A click on the button while it is open only closes it. -->
                     <ToggleButton x:Name="MoreButton" ToolTip="HUD scale" Margin="0,2,0,2"

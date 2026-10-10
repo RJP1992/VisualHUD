@@ -301,16 +301,20 @@ public partial class HudCanvas
     {
         _snapXs.Clear();
         _snapYs.Clear();
+        _otherBounds.Clear();
         _snapXs.AddRange(new[] { 0, _screen.Width / 2.0, _screen.Width });
         _snapYs.AddRange(new[] { 0, _screen.Height / 2.0, _screen.Height });
         if (_layout is null) return;
         foreach (var other in _layout.All)
         {
-            if (!_visuals.ContainsKey(other.Block) || moving.Any(m => ReferenceEquals(m, other) || IsInside(other, m))) continue;
+            // What is drawn, and the frames of groups with a Rect written.
+            var framed = ElementKinds.IsGroupBased(other.Kind) && other.Piece is null && HasRectLine(other);
+            if (!_visuals.ContainsKey(other.Block) && !framed || moving.Any(m => ReferenceEquals(m, other) || IsInside(other, m))) continue;
             var b = ScreenBounds(other);
             if (b.IsEmpty) continue;
             _snapXs.AddRange(new[] { b.Left, b.Left + b.Width / 2, b.Right });
             _snapYs.AddRange(new[] { b.Top, b.Top + b.Height / 2, b.Bottom });
+            _otherBounds.Add(b);
         }
     }
 }

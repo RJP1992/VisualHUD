@@ -178,6 +178,11 @@ one's for the same key.
   them all, in one undo step. An edge or the centre of what is dragged snaps to the edges and
   centres of the other elements drawn and to the screen's edges and centre lines, shown by a
   pink line; hold **Alt** not to snap, and **Shift** to keep to one axis.
+- While dragging, orange lines give the gaps in pixels from what is dragged to the nearest
+  element facing it on each side, or to the screen's edge. With **Alt** held over an element,
+  they give the gaps between it and the element with the cross, or from the one inside to the
+  edges of the one round it; over nothing, to the screen's edges. A group with a `Rect` counts as
+  its frame, for these and for snapping.
 - The element with the cross shows **handles** on its quad, a group's `Rect` or a Text's `TextBox`:
   dragging one resizes it, writing the size in the line's own unit, with its `Position` moved
   so the edges not dragged stay and, for a group, what it holds staying where it is. **Shift**

@@ -1429,7 +1429,11 @@ public partial class HudCanvas : UserControl
             ResizeTo(e.GetPosition(CanvasSurface), Keyboard.Modifiers);
             return;
         }
-        if (_dragBlock is null || !CanvasSurface.IsMouseCaptured) return;
+        if (_dragBlock is null || !CanvasSurface.IsMouseCaptured)
+        {
+            MeasureOnHover(e);
+            return;
+        }
         var current = e.GetPosition(CanvasSurface);
         var dx = current.X - _dragStartMouse.X;
         var dy = current.Y - _dragStartMouse.Y;
@@ -1475,6 +1479,7 @@ public partial class HudCanvas : UserControl
         _reuseVisuals = true;
         Render();
         DrawGuides(met.X, met.Y);
+        if (!_dragStartBounds.IsEmpty) DrawDragGaps(Rect.Offset(_dragStartBounds, dx, dy));
         BlockDragged?.Invoke(this, _dragBlock);
     }
 
@@ -1588,6 +1593,7 @@ public partial class HudCanvas : UserControl
         _clickCycleArmed = false;
         Guides = (null, null);
         DrawGuides(null, null);
+        ClearGaps();
         var changes = originals.Select(o => o with { New = o.Line.Arguments[o.Index] }).Where(c => c.New != c.Old).ToList();
         if (block is null || changes.Count == 0) return;
         var moved = changes.Select(c => c.Line).Distinct().Count();

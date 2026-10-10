@@ -41,11 +41,15 @@ public static class UiThread
     }
 
     /// <summary>Run <paramref name="body"/> on the UI thread, with a window that has these files open.</summary>
-    public static void WithWindow(string hudText, Action<MainWindow, string> body)
+    public static void WithWindow(string hudText, Action<MainWindow, string> body) => WithWindow(hudText, null, body);
+
+    /// <summary>The same, with more files beside the .hud file (textures, say), by name.</summary>
+    public static void WithWindow(string hudText, IReadOnlyDictionary<string, byte[]>? files, Action<MainWindow, string> body)
     {
         var folder = Directory.CreateTempSubdirectory("visualhud-hud-").FullName;
         var path = Path.Combine(folder, "test.hud");
         File.WriteAllText(path, hudText);
+        foreach (var (name, bytes) in files ?? new Dictionary<string, byte[]>()) File.WriteAllBytes(Path.Combine(folder, name), bytes);
         Exception? failure = null;
         Ui.Value.Invoke(() =>
         {

@@ -139,6 +139,24 @@ Then:
   is drawn from its head: a lower ZOrder draws on top.
 - **Runtime HUD scale.** `HUD::Element::SetRuntimeScale` (P `005F5400`) rescales the axes
   of `Scalable(1)` elements and keeps their translation.
+- **Blending.** Bitmaps and text go through the interface shader
+  (`pcInterfaceShader::Begin_Prog1`, P `00411982`; `Render_Prog1`, P `0040C7DE`): `SrcBlend`
+  `SRCALPHA`, `DestBlend` `INVSRCALPHA`, so alpha blending; with `BlendMode("Additive")`
+  (material flag `0x40`) `DestBlend` is `ONE`: the texture times the colour times its alpha
+  is added to what is under it, which only ever brightens. Textures are clamped at their
+  edges and filtered linearly, with mipmaps. The editor draws an additive element as a
+  premultiplied colour with no alpha, which WPF composites the same way.
+- **BlendMode on a group.** `RedGroupElement::SetBlendMode` (P `008C3B20`) stores nothing and
+  passes the mode to the children the group holds when the line is read: a group's line read
+  after a child replaces the child's own, the outermost group's last. A Model3D keeps no mode
+  (its `SetBlendMode` is a stub, see BF2GameExt `docs/RE/HUDBlendMode.md`).
+- **The Shadow style.** `BitmapStyle("Shadow")` and `TextStyle("Shadow")` turn on the
+  shader's shadow pass (`RedBitmapElement::RenderUsingContext`, P `008C8CB0`;
+  `RedGlyphCacheElement::RenderUsingContext`, P `008C4870`): the same quads first in black at
+  half the element's alpha byte (`a >> 1`), moved by (2, -2) in clip space before the divide
+  by w, which is 640/t on the HUD's plane: W/554 pixels right and H/554 down, 3.5 by 1.9 at
+  1920 x 1080, whatever the element's scale or turn. An additive element's shadow adds black,
+  which is nothing.
 
 ## Models
 
@@ -191,7 +209,8 @@ Then:
 at a time, in the game's order (`GameLoop::Update`, P `005CDD90`): every element's update, in
 the order the files built them; then that frame's sends, each with its transforms run at
 once; then GameExt's lerps tick and publish. A send is made at the clock's time; scrubbing back
-replays from the start.
+replays from the start. At 0 s there is no clock: every send shows what it ends with, fades
+done and lerps there, as before any time is run.
 
 - **The fader** (`HUD::Envelope`, P `0060F040`): `FadeInTime`, `FadeHoldTime` (endless by
   default), `FadeSustainTime`, `FadeOutTime`. `EventEnable` starts it and `EventDisable` stops

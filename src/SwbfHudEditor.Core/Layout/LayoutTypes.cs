@@ -219,6 +219,12 @@ public sealed class LaidOutElement
     /// </summary>
     public Matrix4x4 LoadLocal { get; set; }
 
+    /// <summary>
+    /// Drawn additively, adding its colour to what is under it (<c>DestBlend ONE</c>): its own <c>BlendMode</c>,
+    /// unless a group above it read a <c>BlendMode</c> line after it, which the group passes on.
+    /// </summary>
+    public bool Additive { get; set; }
+
     /// <summary>A masked bitmap's mask texture and the part of it its quad shows (<c>Mask</c>, <c>MaskTexCoords</c>).</summary>
     public string? Mask { get; set; }
     public TexRect MaskUv { get; set; } = TexRect.Full;

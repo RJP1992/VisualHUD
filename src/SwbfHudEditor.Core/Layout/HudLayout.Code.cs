@@ -43,6 +43,7 @@ public static partial class HudLayout
         var group = bar.Parent;
         var piece = AddPiece(bar, BareSpec(ElementKind.Bitmap), null, bar.Spec.ZOrder != 0 ? bar.Spec.ZOrder - 1 : 0,
             Matrix4x4.Identity, Vector3.One, strip.Alpha);
+        piece.Additive = bar.Additive;   // RefreshStrip copies the bar's blend mode
         // White, tinted by the bar's group rather than the bar; the strip's own alpha, through the group's.
         piece.DrawColor = group?.DrawColor ?? Vector3.One;
         piece.DrawAlpha = strip.Alpha * (group is { Spec.PropagateAlpha: true } ? group.DrawAlpha : 1f);
@@ -78,6 +79,7 @@ public static partial class HudLayout
         };
         p.InActiveViewport = owner.InActiveViewport;
         p.Shown = owner.Shown;
+        p.Additive = spec.Additive && spec.Kind != ElementKind.Model3D;
         p.FrameWidth = owner.RectWidthPixels;
         p.FrameHeight = owner.RectHeightPixels;
         p.Local = p.LoadLocal = local;

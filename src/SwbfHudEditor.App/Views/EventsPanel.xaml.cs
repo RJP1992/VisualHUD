@@ -152,6 +152,9 @@ public partial class EventsPanel : UserControl
         ClockSlider.Maximum = Math.Max(10, Math.Max(last + 5, Math.Ceiling(_state.Now + 1)));
         ClockSlider.Value = _state.Now;
         ClockText.Text = _state.Now.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " s";
+        ClockText.ToolTip = _state.Now <= 0
+            ? "At 0 s every send shows what it ends with: fades done, colours settled, lerps there. Play, or drag the slider, to see them over time."
+            : "The clock's time: the HUD as it stands this long after the first send's frame.";
         _showingClock = false;
     }
 

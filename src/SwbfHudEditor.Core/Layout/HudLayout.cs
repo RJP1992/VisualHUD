@@ -144,6 +144,7 @@ public static partial class HudLayout
             ScreenPixelsWide = ctx.Screen.WidthF,
         };
         e.InActiveViewport = e.Viewport == 0 || e.Viewport == ctx.Options.ActiveViewport;
+        e.Additive = BlendModeOf(e);
         var runtime = ctx.Options.Simulation?.For(block);
         e.Runtime = runtime;
         e.Enabled = !ctx.ShowsByEvents || runtime is { Enabled: true };
@@ -243,6 +244,35 @@ public static partial class HudLayout
         if (kind == ElementKind.BarSegmented) LayOutSegments(ctx, e);
         AddCodePieces(ctx, e);
         return e;
+    }
+
+    /// <summary>
+    /// The blend mode an element ends up with. Its own <c>BlendMode</c> line sets it as it is read; a group's
+    /// line is passed to the children the group holds by then (<c>RedGroupElement::SetBlendMode</c>, P
+    /// <c>008C3B20</c>), so a group's line read after an element replaces the element's own, the outermost
+    /// group last. A Model3D keeps none (its <c>SetBlendMode</c> is a stub).
+    /// </summary>
+    private static bool BlendModeOf(LaidOutElement e)
+    {
+        if (e.Kind == ElementKind.Model3D) return false;
+        var additive = e.Spec.Additive;
+        for (var child = e; child.Parent is { } group; child = group)
+        {
+            var lines = group.Block.Children;
+            var at = lines.IndexOf(child.Block);
+            if (at < 0) break;
+            for (var i = lines.Count - 1; i > at; i--)
+            {
+                var line = lines[i];
+                if (line.HasBody || line.Name != "BlendMode" || line.Arguments.Count == 0) continue;
+                if (EngineArgs.String(line.Arguments[0]) is not { } name) continue;
+                if (string.Equals(name, "Additive", StringComparison.OrdinalIgnoreCase)) additive = true;
+                else if (string.Equals(name, "Alpha", StringComparison.OrdinalIgnoreCase)) additive = false;
+                else continue;   // an unknown name is ignored, as by the element
+                break;
+            }
+        }
+        return additive;
     }
 
     /// <summary>

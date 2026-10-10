@@ -109,6 +109,15 @@ public sealed class ElementSpec
 
     public bool Additive { get; set; }
 
+    /// <summary>
+    /// <c>BitmapStyle</c>: "Shadow" draws a black copy at half the alpha under the bitmap, as
+    /// <c>TextStyle("Shadow")</c> does under a text (<c>pcInterfaceShader::Render_Prog1</c>, P <c>0040C7DE</c>).
+    /// </summary>
+    public string? BitmapStyle { get; set; }
+
+    /// <summary>A style name the game reads as its shadow style (the name table matches on its start).</summary>
+    public static bool IsShadow(string? style) => style is not null && style.StartsWith("Shadow", StringComparison.OrdinalIgnoreCase);
+
     // ---- Group base ------------------------------------------------------------------------------
 
     /// <summary><c>Rect(w, h [, h-align [, v-align [, mode]]])</c>: 1 × 1, Viewport, Left/Top by default.</summary>
@@ -496,6 +505,9 @@ public static class ElementReader
                 var v = EngineArgs.NameAt(line, 1, EngineArgs.TextVAlignNames, (int)s.TextVAlign);
                 s.TextHAlign = (TextHAlign)h;
                 s.TextVAlign = (TextVAlign)v;
+                break;
+            case "BitmapStyle" when n >= 1:
+                s.BitmapStyle = EngineArgs.String(line.Arguments[0]);
                 break;
             case "TextStyle" when n >= 1:
                 s.TextStyle = EngineArgs.String(line.Arguments[0]);

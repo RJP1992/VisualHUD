@@ -114,6 +114,9 @@ one's for the same key.
   Target's markers and the Map's backdrop, north pointer, view cone, posts and units, with
   sample objectives, messages, seats, targets, posts and units. A sent `EventChangeMapMode`
   shows the large or spawn map; a sent `EventText` shows in a MultilineText.
+- Bitmaps and text blend as the game blends them: `BlendMode("Additive")` adds to what is under
+  it, a group's `BlendMode` reaches the children it holds when the line is read, and the Shadow
+  style draws the game's black copy at half the alpha, W/554 pixels right and H/554 down.
 - Models are drawn as the game draws them, through its camera: one mesh unit is
   `W / (640 × Depth)` pixels across (300 at 1920 wide), a nearer part is larger, and a
   `MeshInfo` places only a mesh its event sends. See [docs/Engine.md](docs/Engine.md#models).
@@ -227,7 +230,8 @@ game, by GameExt, or by a transform), its type, and who reads it.
 - The clock above the list (▶) runs the HUD over time, at 60 frames a second: fades in and
   out, colours easing back and pulsing, `UseChangeColor` flashes, bars' change strips, and
   GameExt's Lerp easing and Compare hysteresis play out as in the game. A send is made at the
-  clock's time; drag the slider to see any moment, or ⏮ to play the sends again from 0.
+  clock's time; drag the slider to see any moment, or ⏮ to play the sends again from 0. At 0 s
+  every send shows what it ends with, fades done, so a value can be checked without running time.
 - Type a value and press Enter, or **Send** to send it again so it counts as the latest. What it
   sets shows on the canvas at once: bars fill, texts print their numbers and strings, colours,
   textures and models change, and groups move, scale and turn. Transforms run as the game runs

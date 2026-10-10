@@ -213,10 +213,14 @@ public partial class HudCanvas : UserControl
     private bool _clockStale = true;
     private bool _renderPending;
 
-    /// <summary>The clock at the event state's time: started again when the sends, the files or the mode changed, or time went back.</summary>
+    /// <summary>
+    /// The clock at the event state's time: started again when the sends, the files or the mode changed, or
+    /// time went back. At 0 s there is none: every send shows what it ends with, fades done, lerps there,
+    /// until the clock is run or dragged.
+    /// </summary>
     private HudClock? ClockNow(Func<uint, string?>? localize)
     {
-        if (_events is null || _graph is null) return null;
+        if (_events is null || _graph is null || _events.Now <= 0) return null;
         var allShown = !_showByEvents;
         if (_clock is null || _clockStale || _clock.AllShown != allShown || _clockVersion != _events.Version ||
             _clock.Frame > HudClock.FrameFor(_events.Now))
@@ -376,7 +380,7 @@ public partial class HudCanvas : UserControl
     /// <summary>Everything that can change how an element is drawn: its values, and its own lines as written.</summary>
     private readonly record struct VisualSignature(ElementKind Kind, string? Texture, QuadRect? Quad, TexRect Uv, Vector3 Color,
         float Alpha, Matrix4x4 ToScreen, Matrix4x4 World, string? Mesh, float Depth, string? Mask, TexRect MaskUv, string? Text,
-        int BoxWidth, int BoxHeight, bool Shown, bool Simulated, int Segments, int Lines);
+        int BoxWidth, int BoxHeight, bool Shown, bool Simulated, int Segments, int Lines, bool Additive);
 
     /// <summary>
     /// A block's own lines and the blocks inside it that are not elements (templates, MeshInfo, Format),
@@ -419,7 +423,7 @@ public partial class HudCanvas : UserControl
         return new VisualSignature(e.Kind, e.Texture, e.Quad, e.Uv, e.DrawColor, e.DrawAlpha, e.ToScreen,
             e.Kind == ElementKind.Model3D ? e.World : default, e.Mesh, e.MeshDepth, e.Mask, e.MaskUv,
             e.Kind == ElementKind.Text ? e.Text ?? ShownText(e) : null, e.TextBoxWidth, e.TextBoxHeight, e.Shown,
-            e.Runtime is not null, segments, LinesHash(e.Piece?.Owner.Block ?? e.Block));
+            e.Runtime is not null, segments, LinesHash(e.Piece?.Owner.Block ?? e.Block), e.Additive);
     }
 
     /// <summary>How the canvas lays a block out now, if it is an element.</summary>
@@ -604,9 +608,8 @@ public partial class HudCanvas : UserControl
             case ElementKind.BarBitmap:
             case ElementKind.ProceduralBarBitmap:
                 if (e.Quad is not { } quad) return null;
-                if (e.Piece?.Role == CodePieceRole.MapBackdrop)
-                    return QuadVisual(e.Spec, SampleMapName, quad, e.Uv, e.ToScreen, e.DrawColor, e.DrawAlpha, LabelFor(e), e.Mask, e.MaskUv);
-                return QuadVisual(e.Spec, e.Texture, quad, e.Uv, e.ToScreen, e.DrawColor, e.DrawAlpha, LabelFor(e), e.Mask, e.MaskUv);
+                return QuadVisual(e.Spec, e.Piece?.Role == CodePieceRole.MapBackdrop ? SampleMapName : e.Texture, quad, e.Uv, e.ToScreen,
+                    e.DrawColor, e.DrawAlpha, LabelFor(e), e.Mask, e.MaskUv, e.Additive);
             case ElementKind.Text:
                 return TextVisual(e);
             case ElementKind.Model3D:
@@ -636,8 +639,22 @@ public partial class HudCanvas : UserControl
     /// A textured quad: the quad in the element's own pixels, under its matrix. A quad drawn right to
     /// left or bottom to top (a FillFrom bar, a flipped TexCoords) keeps each edge's coordinate.
     /// </summary>
+    /// <summary>
+    /// How far down and right a Shadow style's black copy is drawn, in screen pixels: the interface shader
+    /// adds (2, -2) to the clip position before the divide by w, 640 / t on the HUD's plane
+    /// (<c>pcInterfaceShader::Render_Prog1</c>, P <c>0040C7DE</c>; the stock and Shader Patch vertex shaders).
+    /// </summary>
+    private System.Windows.Vector ShadowOffset
+    {
+        get
+        {
+            var w = EngineMath.InterfaceWidth / EngineMath.FrustumWidth;
+            return new System.Windows.Vector(_screen.Width / w, _screen.Height / w);
+        }
+    }
+
     private FrameworkElement? QuadVisual(ElementSpec spec, string? textureName, QuadRect quad, TexRect uv, Matrix4x4 toScreen,
-        Vector3 color, float alpha, string label, string? mask = null, TexRect? maskUv = null)
+        Vector3 color, float alpha, string label, string? mask = null, TexRect? maskUv = null, bool additive = false)
     {
         var (x0, u0, x1, u1) = quad.Left <= quad.Right ? (quad.Left, uv.U0, quad.Right, uv.U1) : (quad.Right, uv.U1, quad.Left, uv.U0);
         var (y0, v0, y1, v1) = quad.Top <= quad.Bottom ? (quad.Top, uv.V0, quad.Bottom, uv.V1) : (quad.Bottom, uv.V1, quad.Top, uv.V0);
@@ -657,29 +674,47 @@ public partial class HudCanvas : UserControl
         }
         else
         {
-            var source = Tinted(texture, color, spec.Additive);
-            var brush = new ImageBrush(source)
+            Rectangle Quad(BitmapSource source, double opacity)
             {
-                Stretch = Stretch.Fill,
-                ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
-                Viewbox = new Rect(Math.Min(u0, u1), Math.Min(v0, v1), Math.Max(Math.Abs(u1 - u0), 1e-6), Math.Max(Math.Abs(v1 - v0), 1e-6)),
-            };
-            if (u1 < u0 || v1 < v0) brush.RelativeTransform = new ScaleTransform(u1 < u0 ? -1 : 1, v1 < v0 ? -1 : 1, 0.5, 0.5);
-            brush.Freeze();
-            visual = new Rectangle { Width = w, Height = h, Fill = brush, Opacity = Math.Clamp(alpha, 0.0, 1.0) };
-            // A masked bitmap: the mask's alpha multiplies it, the part MaskTexCoords gives over the quad.
-            if (mask is { Length: > 0 } && _textures?.Get(mask) is { } maskTexture)
-            {
-                var m = maskUv ?? TexRect.Full;
-                var maskBrush = new ImageBrush(maskTexture)
+                var brush = new ImageBrush(source)
                 {
                     Stretch = Stretch.Fill,
                     ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
-                    Viewbox = new Rect(Math.Min(m.U0, m.U1), Math.Min(m.V0, m.V1), Math.Max(Math.Abs(m.U1 - m.U0), 1e-6), Math.Max(Math.Abs(m.V1 - m.V0), 1e-6)),
+                    Viewbox = new Rect(Math.Min(u0, u1), Math.Min(v0, v1), Math.Max(Math.Abs(u1 - u0), 1e-6), Math.Max(Math.Abs(v1 - v0), 1e-6)),
                 };
-                maskBrush.Freeze();
-                visual.OpacityMask = maskBrush;
+                if (u1 < u0 || v1 < v0) brush.RelativeTransform = new ScaleTransform(u1 < u0 ? -1 : 1, v1 < v0 ? -1 : 1, 0.5, 0.5);
+                brush.Freeze();
+                var rect = new Rectangle { Width = w, Height = h, Fill = brush, Opacity = Math.Clamp(opacity, 0.0, 1.0) };
+                // A masked bitmap: the mask's alpha multiplies it, the part MaskTexCoords gives over the quad.
+                if (mask is { Length: > 0 } && _textures?.Get(mask) is { } maskTexture)
+                {
+                    var m = maskUv ?? TexRect.Full;
+                    var maskBrush = new ImageBrush(maskTexture)
+                    {
+                        Stretch = Stretch.Fill,
+                        ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+                        Viewbox = new Rect(Math.Min(m.U0, m.U1), Math.Min(m.V0, m.V1), Math.Max(Math.Abs(m.U1 - m.U0), 1e-6), Math.Max(Math.Abs(m.V1 - m.V0), 1e-6)),
+                    };
+                    maskBrush.Freeze();
+                    rect.OpacityMask = maskBrush;
+                }
+                return rect;
             }
+
+            var place = ToWpf(Matrix4x4.CreateTranslation(x0, y0, 0f) * toScreen);
+            var main = Quad(Tinted(texture, color, additive), alpha);
+            main.RenderTransform = new MatrixTransform(place);
+            // The Shadow style: first the same quad in black at half the alpha, a little down and right on the
+            // screen. Drawn additively, black adds nothing.
+            if (!ElementSpec.IsShadow(spec.BitmapStyle) || additive) return main;
+            var shadow = Quad(Tinted(texture, Vector3.Zero, false), Math.Floor(Math.Clamp(alpha, 0, 1) * 255) / 2 / 255);
+            var offset = ShadowOffset;
+            place.Translate(offset.X, offset.Y);
+            shadow.RenderTransform = new MatrixTransform(place);
+            var pair = new Canvas();
+            pair.Children.Add(shadow);
+            pair.Children.Add(main);
+            return pair;
         }
         visual.RenderTransform = new MatrixTransform(ToWpf(Matrix4x4.CreateTranslation(x0, y0, 0f) * toScreen));
         return visual;
@@ -715,10 +750,17 @@ public partial class HudCanvas : UserControl
         var box = GuidesBox.IsChecked == true && (e.TextBoxWidth > 0 || e.TextBoxHeight > 0)
             ? new Rect(0, 0, e.TextBoxWidth, e.TextBoxHeight)
             : (Rect?)null;
-        var shadow = spec.TextStyle is { } style && style.StartsWith("Shadow", StringComparison.OrdinalIgnoreCase);
+        var shadow = ElementSpec.IsShadow(spec.TextStyle) && !e.Additive;
         var brush = new SolidColorBrush(ToColor(e.DrawColor));
         brush.Freeze();
-        return new TextGlyphsVisual(layout, font, brush, shadow, box)
+        // The shadow's offset is on the screen; in the text's own pixels it is that through its matrix.
+        var m = e.ToScreen;
+        var det = m.M11 * m.M22 - m.M12 * m.M21;
+        var off = ShadowOffset;
+        var shadowOffset = MathF.Abs(det) < 1e-9f
+            ? new System.Windows.Vector(0, 0)
+            : new System.Windows.Vector((off.X * m.M22 - off.Y * m.M21) / det, (-off.X * m.M12 + off.Y * m.M11) / det);
+        return new TextGlyphsVisual(layout, font, brush, shadow, shadowOffset, e.Additive, box)
         {
             Opacity = Math.Clamp(e.DrawAlpha, 0.0, 1.0),
             RenderTransform = new MatrixTransform(ToWpf(e.ToScreen)),
@@ -756,7 +798,8 @@ public partial class HudCanvas : UserControl
         foreach (var s in bar.Segments)
         {
             if (!s.Lit) continue;
-            if (QuadVisual(seg, seg.Texture, quad, seg.TexCoords, s.ToScreen, color, alpha, LabelFor(bar)) is { } v) panel.Children.Add(v);
+            if (QuadVisual(seg, seg.Texture, quad, seg.TexCoords, s.ToScreen, color, alpha, LabelFor(bar), additive: seg.Additive) is { } v)
+                panel.Children.Add(v);
         }
         return panel.Children.Count > 0 ? panel : null;
     }
@@ -883,8 +926,9 @@ public partial class HudCanvas : UserControl
     private readonly Dictionary<(BitmapSource, uint, bool), BitmapSource> _tinted = new();
 
     /// <summary>
-    /// The texture times the colour, as the interface shader draws it. Additive blending has no WPF
-    /// equivalent: its brightness becomes alpha, so a glow on black reads as the glow.
+    /// The texture times the colour, as the interface shader draws it. Additive (<c>SrcBlend SRCALPHA</c>,
+    /// <c>DestBlend ONE</c>) is a premultiplied colour with no alpha: WPF composites premultiplied, so it adds
+    /// the colour times the texture's alpha (and the element's, its opacity) to what is under it.
     /// </summary>
     private BitmapSource Tinted(BitmapSource source, Vector3 color, bool additive)
     {
@@ -904,12 +948,20 @@ public partial class HudCanvas : UserControl
             var b = pixels[i] * c.B / 255;
             var g = pixels[i + 1] * c.G / 255;
             var r = pixels[i + 2] * c.R / 255;
+            if (additive)
+            {
+                var a = pixels[i + 3];
+                pixels[i] = (byte)(b * a / 255);
+                pixels[i + 1] = (byte)(g * a / 255);
+                pixels[i + 2] = (byte)(r * a / 255);
+                pixels[i + 3] = 0;
+                continue;
+            }
             pixels[i] = (byte)b;
             pixels[i + 1] = (byte)g;
             pixels[i + 2] = (byte)r;
-            if (additive) pixels[i + 3] = (byte)(Math.Max(r, Math.Max(g, b)) * pixels[i + 3] / 255);
         }
-        var output = new WriteableBitmap(w, h, source.DpiX, source.DpiY, PixelFormats.Bgra32, null);
+        var output = new WriteableBitmap(w, h, source.DpiX, source.DpiY, additive ? PixelFormats.Pbgra32 : PixelFormats.Bgra32, null);
         output.WritePixels(new Int32Rect(0, 0, w, h), pixels, stride, 0);
         output.Freeze();
         return _tinted[key] = output;

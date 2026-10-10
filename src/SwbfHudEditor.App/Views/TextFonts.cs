@@ -71,7 +71,11 @@ public sealed class TextFont
     /// pixel down and right under it. Null for a stand-in font, which <see cref="Draw"/> draws.
     /// <paramref name="area"/> is where the image goes, in the element's own pixels.
     /// </summary>
-    public BitmapSource? Render(IReadOnlyList<PlacedGlyph> glyphs, Color color, bool shadow, out Rect area)
+    public BitmapSource? Render(IReadOnlyList<PlacedGlyph> glyphs, Color color, bool shadow, out Rect area) =>
+        Render(glyphs, color, shadow, false, out area);
+
+    /// <summary>The text in one image; <paramref name="additive"/>: as a premultiplied colour with no alpha, which adds.</summary>
+    public BitmapSource? Render(IReadOnlyList<PlacedGlyph> glyphs, Color color, bool shadow, bool additive, out Rect area)
     {
         area = Rect.Empty;
         if (Metrics is not FffFont font) return null;
@@ -109,7 +113,7 @@ public sealed class TextFont
             pixels[i * 4] = (byte)(color.B * t + 0.5f);       // premultiplied: the shadow adds black
             pixels[i * 4 + 1] = (byte)(color.G * t + 0.5f);
             pixels[i * 4 + 2] = (byte)(color.R * t + 0.5f);
-            pixels[i * 4 + 3] = (byte)(Math.Min(1f, a) * 255f + 0.5f);
+            pixels[i * 4 + 3] = additive ? (byte)0 : (byte)(Math.Min(1f, a) * 255f + 0.5f);
         }
         var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Pbgra32, null, pixels, width * 4);
         bitmap.Freeze();
@@ -235,18 +239,24 @@ internal sealed class TextGlyphsVisual : FrameworkElement
     private readonly bool _shadow;
     private readonly Rect? _box;
     private readonly Rect _bounds;
-    // A game font's text, drawn once into an image.
+    // A game font's text, drawn once into an image, and its shadow: black, at half the alpha, offset.
     private readonly BitmapSource? _image;
     private readonly Rect _imageArea;
+    private readonly BitmapSource? _shadowImage;
+    private readonly Rect _shadowArea;
+    private readonly Vector _shadowOffset;
 
-    public TextGlyphsVisual(TextLayoutResult layout, TextFont font, Brush brush, bool shadow, Rect? box)
+    public TextGlyphsVisual(TextLayoutResult layout, TextFont font, Brush brush, bool shadow, Vector shadowOffset, bool additive, Rect? box)
     {
         _layout = layout;
         _font = font;
         _brush = brush;
         _shadow = shadow;
+        _shadowOffset = shadowOffset;
         _box = box;
-        if (brush is SolidColorBrush solid) _image = font.Render(layout.Glyphs, solid.Color, shadow, out _imageArea);
+        if (brush is not SolidColorBrush solid) return;
+        _image = font.Render(layout.Glyphs, solid.Color, false, additive, out _imageArea);
+        if (shadow) _shadowImage = font.Render(layout.Glyphs, Colors.Black, false, false, out _shadowArea);
         // What can be clicked: the lines and the box.
         var bounds = Rect.Empty;
         foreach (var line in layout.Lines)
@@ -258,20 +268,32 @@ internal sealed class TextGlyphsVisual : FrameworkElement
     /// <summary>Where the text and its box are, in the element's own pixels.</summary>
     public Rect Bounds => _bounds;
 
+    /// <summary>Where its shadow is drawn, in its own pixels, when it has one: for tests.</summary>
+    internal Vector? ShadowAt => _shadow ? _shadowOffset : null;
+
     protected override void OnRender(DrawingContext dc)
     {
         if (!_bounds.IsEmpty) dc.DrawRectangle(Brushes.Transparent, null, _bounds);
         if (_box is { } box) dc.DrawRectangle(null, BoxPen, box);
         if (_image is not null)
         {
+            // The interface shader's shadow pass, then the text (pcInterfaceShader::Render_Prog1, P 0040C7DE).
+            if (_shadowImage is not null)
+            {
+                dc.PushOpacity(0.5);
+                dc.DrawImage(_shadowImage, new Rect(_shadowArea.TopLeft + _shadowOffset, _shadowArea.Size));
+                dc.Pop();
+            }
             dc.DrawImage(_image, _imageArea);
             return;
         }
         if (_font.FromGame) return;
         if (_shadow)
         {
-            dc.PushTransform(new TranslateTransform(1, 1));
+            dc.PushOpacity(0.5);
+            dc.PushTransform(new TranslateTransform(_shadowOffset.X, _shadowOffset.Y));
             _font.Draw(dc, _layout.Glyphs, Brushes.Black);
+            dc.Pop();
             dc.Pop();
         }
         _font.Draw(dc, _layout.Glyphs, _brush);

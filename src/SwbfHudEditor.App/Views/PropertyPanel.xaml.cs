@@ -389,7 +389,9 @@ public partial class PropertyPanel : UserControl
             box.Text = picked;
             Commit(leaf, index, picked);
         });
+        // The pair has the width and the box fills it, so a line of one value stretches the box with the row.
         var grid = new Grid { Width = box.Width, Margin = box.Margin };
+        box.Width = double.NaN;
         box.Margin = new Thickness(0);
         grid.Children.Add(box);
         grid.Children.Add(open);

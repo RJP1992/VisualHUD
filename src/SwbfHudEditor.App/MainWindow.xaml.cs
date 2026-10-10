@@ -43,6 +43,9 @@ public partial class MainWindow : Window
     private readonly UndoManager _undo = new();
     // The events sent in the Events tab: the game state the canvas draws while simulating.
     private readonly HudEventState _events = new();
+
+    /// <summary>The events sent, for tests.</summary>
+    internal HudEventState EventState => _events;
     // The lines saving leaves out as engine defaults, for the Properties panel; found again after a change.
     private HashSet<HudBlock>? _defaultLines;
     // Asset folders, kept in the user's settings and each read in the background with all its

@@ -22,7 +22,33 @@ public static partial class HudLayout
             case ElementKind.VehicleSeating: VehicleSeating(ctx, e); break;
             case ElementKind.Target: Target(ctx, e); break;
             case ElementKind.Map: Map(ctx, e); break;
+            case ElementKind.BarBitmap when e.Runtime?.Clock?.Strip is { } strip: BarStrip(e, strip); break;
         }
+    }
+
+    /// <summary>
+    /// A BarBitmap's change strip (<c>ElementBarBitmap::SetValue</c>, P <c>005F7920</c>, and Update, P <c>005F7C30</c>):
+    /// the bar's texture in white over the part of the bar the last change uncovered, fading out. A shrinking
+    /// strip's top comes down to <c>FlashyScale</c> pixels above its bottom over the first second.
+    /// </summary>
+    private static void BarStrip(LaidOutElement bar, Events.StripState strip)
+    {
+        if (bar.FullQuad is not { } full) return;
+        var uv = bar.Spec.TexCoords;
+        var flashyScale = Line(bar.Block, "FlashyScale") is { } fs ? EngineArgs.FloatAt(fs, 0) : 0.2f;
+        float x0 = full.Left + strip.From * full.Width, x1 = full.Left + strip.To * full.Width;
+        float u0 = uv.U0 + strip.From * (uv.U1 - uv.U0), u1 = uv.U0 + strip.To * (uv.U1 - uv.U0);
+        var h = full.Height * (1f - strip.Collapse) + strip.Collapse * flashyScale;
+        var hv = (uv.V1 - uv.V0) * (1f - strip.Collapse) + strip.Collapse * flashyScale;
+        var group = bar.Parent;
+        var piece = AddPiece(bar, BareSpec(ElementKind.Bitmap), null, bar.Spec.ZOrder != 0 ? bar.Spec.ZOrder - 1 : 0,
+            Matrix4x4.Identity, Vector3.One, strip.Alpha);
+        // White, tinted by the bar's group rather than the bar; the strip's own alpha, through the group's.
+        piece.DrawColor = group?.DrawColor ?? Vector3.One;
+        piece.DrawAlpha = strip.Alpha * (group is { Spec.PropagateAlpha: true } ? group.DrawAlpha : 1f);
+        piece.Quad = piece.FullQuad = new QuadRect(MathF.Min(x0, x1), full.Bottom - h, MathF.Max(x0, x1), full.Bottom);
+        piece.Uv = new TexRect(MathF.Min(u0, u1), uv.V1 - hv, MathF.Max(u0, u1), uv.V1);
+        piece.Texture = bar.Texture;
     }
 
     // ---- Pieces ----------------------------------------------------------------------------------

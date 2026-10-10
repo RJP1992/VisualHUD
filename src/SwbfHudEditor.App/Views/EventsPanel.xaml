@@ -17,13 +17,29 @@
                 <Button Content="Clear" Click="Clear_Click" Margin="0,0,4,4"
                         ToolTip="Forget every event sent: every element is back in its load state, and, with the game's showing and hiding, hidden again." />
             </WrapPanel>
+            <!-- The clock: the sends replayed at their times, a frame at a time. -->
+            <DockPanel Margin="0,2,0,6">
+                <ToggleButton x:Name="PlayButton" DockPanel.Dock="Left" Click="Play_Click"
+                              ToolTip="Run the clock: fades, eased colours, pulses, change strips and lerps play out as the game plays them, at 60 frames a second. A send is made at the clock's time.">
+                    <TextBlock x:Name="PlayIcon" Text="&#xE768;" Style="{StaticResource Icon}" />
+                </ToggleButton>
+                <Button DockPanel.Dock="Left" Style="{StaticResource ToolButton}" Click="Rewind_Click" Margin="2,0,6,0"
+                        ToolTip="Back to 0 s, keeping the sends: they play again at their times.">
+                    <TextBlock Text="&#xE892;" Style="{StaticResource Icon}" />
+                </Button>
+                <TextBlock x:Name="ClockText" DockPanel.Dock="Right" Text="0.00 s" MinWidth="52" TextAlignment="Right" VerticalAlignment="Center"
+                           FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}" Margin="6,0,0,0" />
+                <Slider x:Name="ClockSlider" Minimum="0" Maximum="10" VerticalAlignment="Center" IsMoveToPointEnabled="True"
+                        ValueChanged="ClockSlider_ValueChanged" PreviewMouseDown="ClockSlider_PreviewMouseDown"
+                        ToolTip="The clock's time: drag to see the HUD at any moment of the sends." />
+            </DockPanel>
             <Grid Margin="0,2,0,0">
                 <TextBox x:Name="FilterBox" Padding="24,3,6,3" TextChanged="FilterBox_TextChanged"
                          ToolTip="Show events whose name contains this." />
                 <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="11" HorizontalAlignment="Left" Margin="8,0,0,0"
                            Foreground="{StaticResource TextMutedBrush}" IsHitTestVisible="False" />
             </Grid>
-            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). What it sets shows at once; it shows or hides elements only with the box above ticked." Foreground="{StaticResource TextMutedBrush}"
+            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). It is sent at the clock's time; what it sets shows at once, and with the clock running fades and easing play out. It shows or hides elements only with the box above ticked." Foreground="{StaticResource TextMutedBrush}"
                        FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
         </StackPanel>
         <ListBox x:Name="EventList" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"

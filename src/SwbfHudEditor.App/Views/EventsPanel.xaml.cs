@@ -76,7 +76,84 @@ public partial class EventsPanel : UserControl
 
     public bool Simulate => SimulateBox.IsChecked == true;
 
-    public void Bind(HudEventState state) => _state = state;
+    public void Bind(HudEventState state)
+    {
+        if (_state is not null)
+        {
+            _state.ClockChanged -= State_ClockChanged;
+            _state.Changed -= State_ClockChanged;
+        }
+        _state = state;
+        _state.ClockChanged += State_ClockChanged;
+        _state.Changed += State_ClockChanged;
+        ShowClock();
+    }
+
+    // ---- The clock ---------------------------------------------------------------------------------
+
+    private readonly System.Windows.Threading.DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(15) };
+    private readonly System.Diagnostics.Stopwatch _watch = new();
+    private bool _showingClock;
+
+    private void Play_Click(object sender, RoutedEventArgs e)
+    {
+        if (PlayButton.IsChecked == true) Play();
+        else Pause();
+    }
+
+    private void Play()
+    {
+        if (_state is null) return;
+        if (_timer.Tag is null)
+        {
+            _timer.Tick += Timer_Tick;
+            _timer.Tag = true;
+        }
+        _watch.Restart();
+        _timer.Start();
+        PlayButton.IsChecked = true;
+        PlayIcon.Text = "\uE769";
+    }
+
+    private void Pause()
+    {
+        _timer.Stop();
+        PlayButton.IsChecked = false;
+        PlayIcon.Text = "\uE768";
+    }
+
+    /// <summary>Wall-clock time, as the game measures a frame, at most 0.1 s a tick.</summary>
+    private void Timer_Tick(object? sender, EventArgs e)
+    {
+        if (_state is null) return;
+        var elapsed = Math.Min(0.1, _watch.Elapsed.TotalSeconds);
+        _watch.Restart();
+        _state.SetTime(_state.Now + elapsed);
+    }
+
+    private void Rewind_Click(object sender, RoutedEventArgs e) => _state?.SetTime(0);
+
+    private void ClockSlider_PreviewMouseDown(object sender, MouseButtonEventArgs e) => Pause();
+
+    private void ClockSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_showingClock || _state is null) return;
+        _state.SetTime(e.NewValue);
+    }
+
+    private void State_ClockChanged(object? sender, EventArgs e) => ShowClock();
+
+    /// <summary>The time, on a slider that reaches a few seconds past the last send.</summary>
+    private void ShowClock()
+    {
+        if (_state is null) return;
+        _showingClock = true;
+        var last = _state.History.Count > 0 ? _state.History.Max(s => s.Time) : 0;
+        ClockSlider.Maximum = Math.Max(10, Math.Max(last + 5, Math.Ceiling(_state.Now + 1)));
+        ClockSlider.Value = _state.Now;
+        ClockText.Text = _state.Now.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " s";
+        _showingClock = false;
+    }
 
     /// <summary>List the events in use, keeping what was typed for any already listed.</summary>
     public void SetEvents(IReadOnlyList<HudEventUse> uses, Func<HudEventUse, IReadOnlyList<string>> suggestions)

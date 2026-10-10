@@ -4,44 +4,86 @@ using SwbfHudEditor.Core.Layout;
 
 namespace SwbfHudEditor.Core.Events;
 
-/// <summary>An event as last sent: its value and when, in the order sends were made.</summary>
-public readonly record struct EventSend(string Name, HudEventValue Value, long Seq, TransformNode? From = null);
+/// <summary>An event as sent: its value, its place in the order of all sends, and the clock's time then, in seconds.</summary>
+public readonly record struct EventSend(string Name, HudEventValue Value, long Seq, TransformNode? From = null, double Time = 0);
 
 /// <summary>
 /// The events sent so far, the latest of each, in order: the game's state as a scenario. The order
 /// matters because an element shows or hides by whichever of its enable and disable events came last.
+/// Every send is also kept with the clock's time when it was made, for the clock to replay.
 /// </summary>
 public sealed class HudEventState
 {
     private readonly Dictionary<string, EventSend> _sends = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<EventSend> _history = new();
     private long _next = 1;
 
     public IReadOnlyDictionary<string, EventSend> Sends => _sends;
 
+    /// <summary>Every send, in order, with its time.</summary>
+    public IReadOnlyList<EventSend> History => _history;
+
+    /// <summary>The clock's time, in seconds from the first frame: what a send now is stamped with.</summary>
+    public double Now { get; private set; }
+
+    /// <summary>Counts every change to the sends, so a clock knows whether it replays the latest.</summary>
+    public long Version { get; private set; }
+
+    /// <summary>A send was made, forgotten or cleared.</summary>
     public event EventHandler? Changed;
+
+    /// <summary>The clock moved.</summary>
+    public event EventHandler? ClockChanged;
 
     public void Send(string name, HudEventValue value)
     {
-        _sends[name] = new EventSend(name, value, _next++);
+        Record(name, value);
+        Version++;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Several sends, in order, with one change notification.</summary>
     public void SendAll(IEnumerable<(string Name, HudEventValue Value)> sends)
     {
-        foreach (var (name, value) in sends) _sends[name] = new EventSend(name, value, _next++);
+        foreach (var (name, value) in sends) Record(name, value);
+        Version++;
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Record(string name, HudEventValue value)
+    {
+        var send = new EventSend(name, value, _next++, null, Now);
+        _sends[name] = send;
+        _history.Add(send);
     }
 
     public void Forget(string name)
     {
-        if (_sends.Remove(name)) Changed?.Invoke(this, EventArgs.Empty);
+        var removed = _sends.Remove(name);
+        removed |= _history.RemoveAll(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) > 0;
+        if (!removed) return;
+        Version++;
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>Forget every send and put the clock back to 0.</summary>
     public void Clear()
     {
         _sends.Clear();
+        _history.Clear();
+        Now = 0;
+        Version++;
         Changed?.Invoke(this, EventArgs.Empty);
+        ClockChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Move the clock; sends made from then on are stamped with this time.</summary>
+    public void SetTime(double seconds)
+    {
+        seconds = Math.Max(0, seconds);
+        if (seconds == Now) return;
+        Now = seconds;
+        ClockChanged?.Invoke(this, EventArgs.Empty);
     }
 }
 
@@ -53,8 +95,14 @@ public readonly record struct GroupMove(GroupMoveKind Kind, Vector3 Value, strin
 /// <summary>What the events sent did to one element.</summary>
 public sealed class ElementRuntime
 {
-    /// <summary>The later of its <c>EventEnable</c> and <c>EventDisable</c> events was the enable. An element starts disabled.</summary>
+    /// <summary>
+    /// The later of its <c>EventEnable</c> and <c>EventDisable</c> events was the enable; with the clock, it is
+    /// drawn, fading out included. An element starts disabled.
+    /// </summary>
     public bool Enabled { get; init; }
+
+    /// <summary>With the clock: its fader, colour and alpha as drawn at the clock's time, and a bar's change strip.</summary>
+    public ElementClock? Clock { get; init; }
 
     /// <summary>When its enable event was sent, in the order of all sends (0 if never).</summary>
     public long EnableSeq { get; init; }
@@ -91,37 +139,43 @@ public sealed class HudSimulation
     public ElementRuntime? For(HudBlock block) => Elements.TryGetValue(block, out var r) ? r : null;
 
     public static HudSimulation Run(HudDocument document, HudTransformGraph transforms, HudEventState state,
-        Func<uint, string?>? localizeByHash = null) => Run(new[] { document }, transforms, state, localizeByHash);
+        Func<uint, string?>? localizeByHash = null, HudClock? clock = null) =>
+        Run(new[] { document }, transforms, state, localizeByHash, clock);
 
     /// <summary>The events' effect on every element of the files a HUD loads: events are global to them all.</summary>
+    /// <summary>
+    /// With a <paramref name="clock"/>, the events' values and every element's state as of the clock's frame:
+    /// fades, eased colours, pulses, change strips and eased lerps. Without one, every send has done all it does.
+    /// </summary>
     public static HudSimulation Run(IReadOnlyList<HudDocument> documents, HudTransformGraph transforms, HudEventState state,
-        Func<uint, string?>? localizeByHash = null)
+        Func<uint, string?>? localizeByHash = null, HudClock? clock = null)
     {
-        var effective = new Dictionary<string, EventSend>(state.Sends, StringComparer.OrdinalIgnoreCase);
+        var effective = new Dictionary<string, EventSend>(clock?.Values ?? state.Sends, StringComparer.OrdinalIgnoreCase);
         HudEventValue? Latest(string name) => effective.TryGetValue(name, out var s) ? s.Value : null;
 
         // Transforms in declaration order: each publishes when one of its triggers has been sent, at
-        // that send's place in the order. A later send of an output by hand wins.
-        foreach (var node in transforms.Nodes)
-        {
-            long seq = 0;
-            foreach (var trigger in node.Triggers)
-                if (effective.TryGetValue(trigger, out var t)) seq = Math.Max(seq, t.Seq);
-            if (seq == 0) continue;
-            foreach (var (name, value) in node.Run(Latest).ToList())
-                if (!effective.TryGetValue(name, out var current) || current.Seq <= seq)
-                    effective[name] = new EventSend(name, value, seq, node);
-        }
+        // that send's place in the order. A later send of an output by hand wins. The clock ran them already.
+        if (clock is null)
+            foreach (var node in transforms.Nodes)
+            {
+                long seq = 0;
+                foreach (var trigger in node.Triggers)
+                    if (effective.TryGetValue(trigger, out var t)) seq = Math.Max(seq, t.Seq);
+                if (seq == 0) continue;
+                foreach (var (name, value) in node.Run(Latest).ToList())
+                    if (!effective.TryGetValue(name, out var current) || current.Seq <= seq)
+                        effective[name] = new EventSend(name, value, seq, node);
+            }
 
         var elements = new Dictionary<HudBlock, ElementRuntime>(ReferenceEqualityComparer.Instance);
         foreach (var document in documents)
             foreach (var block in HudLayout.TopLevelElements(document))
-                Visit(block, effective, localizeByHash, elements);
+                Visit(block, effective, localizeByHash, elements, clock);
         return new HudSimulation { Effective = effective, Elements = elements };
     }
 
     private static void Visit(HudBlock block, Dictionary<string, EventSend> effective, Func<uint, string?>? localizeByHash,
-        Dictionary<HudBlock, ElementRuntime> into)
+        Dictionary<HudBlock, ElementRuntime> into, HudClock? clock)
     {
         if (!ElementKinds.TryGet(block, out var kind)) return;
         var spec = ElementReader.Read(block, kind);
@@ -172,10 +226,12 @@ public sealed class HudSimulation
         Move(GroupMoveKind.Rotation, spec.EventRotation);
         moves.Sort((x, y) => x.Seq.CompareTo(y.Seq));
 
+        var tick = clock?.For(block);
         into[block] = new ElementRuntime
         {
-            Enabled = enable > disable,
-            EnableSeq = enable,
+            Enabled = tick?.Shown ?? enable > disable,
+            EnableSeq = tick?.EnableSeq ?? enable,
+            Clock = tick,
             BarValue = bar,
             Text = text,
             Color = color,
@@ -185,7 +241,7 @@ public sealed class HudSimulation
             Moves = moves,
         };
 
-        foreach (var child in spec.Children) Visit(child, effective, localizeByHash, into);
+        foreach (var child in spec.Children) Visit(child, effective, localizeByHash, into, clock);
     }
 
     /// <summary>

@@ -227,11 +227,14 @@ public static partial class HudLayout
 
         if (kind == ElementKind.Model3D) PlaceModel(ctx, e, spec, runtime);
 
-        // EventColor replaces the colour (its alpha is dropped); a group's EventAlpha replaces its alpha.
-        var c = runtime?.Color is { } rc ? new Vector3(rc.R, rc.G, rc.B) / 255f
+        // EventColor replaces the colour (its alpha is dropped); a group's EventAlpha replaces its alpha. With
+        // the clock, the colour eases and pulses, and while the events decide what shows the fader sets the alpha.
+        var c = runtime?.Clock is { } tick ? new Vector3(tick.DrawColor.R, tick.DrawColor.G, tick.DrawColor.B) / 255f
+            : runtime?.Color is { } rc ? new Vector3(rc.R, rc.G, rc.B) / 255f
             : new Vector3(spec.Color.R, spec.Color.G, spec.Color.B) / 255f;
         e.DrawColor = parent is null ? c : c * parent.DrawColor;
-        e.DrawAlpha = (runtime?.Alpha ?? spec.Alpha) * (parent is { Spec.PropagateAlpha: true } ? parent.DrawAlpha : 1f);
+        var ownAlpha = ctx.ShowsByEvents && runtime?.Clock is { } faded ? faded.DrawColor.A / 255f : runtime?.Alpha ?? spec.Alpha;
+        e.DrawAlpha = ownAlpha * (parent is { Spec.PropagateAlpha: true } ? parent.DrawAlpha : 1f);
 
         foreach (var child in spec.Children)
             if (ElementKinds.TryGet(child, out var childKind))

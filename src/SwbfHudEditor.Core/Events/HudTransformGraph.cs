@@ -374,6 +374,12 @@ public sealed class OperandNode : TransformNode
     public string? OutputTrue { get; private set; }
     public string? OutputFalse { get; private set; }
 
+    /// <summary>Compare's <c>Hysteresis</c>: once on, it stays on until the inputs are this far the other way.</summary>
+    public float Hysteresis { get; private set; }
+
+    /// <summary><c>OutputIsAlpha(1)</c>: the output is sent again every frame (an <c>EventAlpha</c> lasts one).</summary>
+    public bool OutputIsAlpha { get; private set; }
+
     private static readonly string[] MathOps = { "Add", "Subtract", "Multiply", "Divide", "Min", "Max" };
     private static readonly string[] CompareOps = { "Greater", "GreaterOrEqual", "Less", "LessOrEqual", "Equal", "NotEqual" };
 
@@ -405,6 +411,8 @@ public sealed class OperandNode : TransformNode
                 case "EventOutput" when Str(line) is { } o: n.Output = filter(o); break;
                 case "EventOutputTrue" when Str(line) is { } o: n.OutputTrue = filter(o); break;
                 case "EventOutputFalse" when Str(line) is { } o: n.OutputFalse = filter(o); break;
+                case "Hysteresis" when IsNum(line) && Num(line) >= 0f: n.Hysteresis = Num(line); break;
+                case "OutputIsAlpha" when IsNum(line): n.OutputIsAlpha = Num(line) != 0f; break;
             }
         }
         if (a is null || b is null) n.Problem ??= "needs both A and B";
@@ -454,8 +462,8 @@ public sealed class OperandNode : TransformNode
             "GreaterOrEqual" => a >= b,
             "Less" => a < b,
             "LessOrEqual" => a <= b,
-            "Equal" => a == b,
-            _ => a != b,
+            "Equal" => Math.Abs(a - b) <= Hysteresis,
+            _ => Math.Abs(a - b) > Hysteresis,
         };
         if (Output is not null) yield return (Output, HudEventValue.FromFloat(on ? 1f : 0f));
         if (on && OutputTrue is not null) yield return (OutputTrue, HudEventValue.FromBool(true));
@@ -472,6 +480,13 @@ public sealed class LerpNode : TransformNode
     public Operand A { get; private set; } = new(0f, null);
     public Operand B { get; private set; } = new(1f, null);
     public string? Output { get; private set; }
+
+    /// <summary>Seconds a full 0 to 1 swing of the input takes going up, and going down; 0 moves at once.</summary>
+    public float RiseTime { get; private set; }
+    public float FallTime { get; private set; }
+
+    /// <summary><c>OutputIsAlpha(1)</c>: the output is sent again every frame.</summary>
+    public bool OutputIsAlpha { get; private set; }
 
     public static LerpNode Read(HudBlock block, string? name, Func<string, string> filter)
     {
@@ -493,6 +508,9 @@ public sealed class LerpNode : TransformNode
                 case "ConstantB" when IsNum(line): n.B = new Operand(Num(line), null); break;
                 case "EventInputA" when Str(line) is { } e: n.A = new Operand(null, filter(e)); break;
                 case "EventInputB" when Str(line) is { } e: n.B = new Operand(null, filter(e)); break;
+                case "RiseTime" when IsNum(line) && Num(line) >= 0f: n.RiseTime = Num(line); break;
+                case "FallTime" when IsNum(line) && Num(line) >= 0f: n.FallTime = Num(line); break;
+                case "OutputIsAlpha" when IsNum(line): n.OutputIsAlpha = Num(line) != 0f; break;
                 case "InputRange" when line.Arguments.Count == 2:
                     n.RangeMin = IsNum(line, 0) ? new Operand(Num(line, 0), null) : new Operand(null, Str(line, 0) is { } lo ? filter(lo) : null);
                     n.RangeMax = IsNum(line, 1) ? new Operand(Num(line, 1), null) : new Operand(null, Str(line, 1) is { } hi ? filter(hi) : null);

@@ -209,6 +209,10 @@ What is hidden here is hidden on the canvas only; the files do not change.
 The Events tab lists every event the files and their transforms use: what it is (sent by the
 game, by GameExt, or by a transform), its type, and who reads it.
 
+- The clock above the list (▶) runs the HUD over time, at 60 frames a second: fades in and
+  out, colours easing back and pulsing, `UseChangeColor` flashes, bars' change strips, and
+  GameExt's Lerp easing and Compare hysteresis play out as in the game. A send is made at the
+  clock's time; drag the slider to see any moment, or ⏮ to play the sends again from 0.
 - Type a value and press Enter, or **Send** to send it again so it counts as the latest. What it
   sets shows on the canvas at once: bars fill, texts print their numbers and strings, colours,
   textures and models change, and groups move, scale and turn. Transforms run as the game runs

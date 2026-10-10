@@ -185,6 +185,38 @@ Then:
   modelled: models are drawn unlit, textured and coloured by their vertices, nearer
   surfaces over farther ones.
 
+## Time
+
+`SwbfHudEditor.Core/Events/HudClock.cs` replays the sends at their times, a frame of 1/60 s
+at a time, in the game's order (`GameLoop::Update`, P `005CDD90`): every element's update, in
+the order the files built them; then that frame's sends, each with its transforms run at
+once; then GameExt's lerps tick and publish. A send is made at the clock's time; scrubbing back
+replays from the start.
+
+- **The fader** (`HUD::Envelope`, P `0060F040`): `FadeInTime`, `FadeHoldTime` (endless by
+  default), `FadeSustainTime`, `FadeOutTime`. `EventEnable` starts it and `EventDisable` stops
+  it, each then updating the element by 0.001 s. Stopped during the fade-in, or started
+  during the fade-out, it keeps the share of the time elapsed, so the level jumps to 1 - L (a
+  game bug). A finite hold fades out on its own. The element is hidden the frame after the
+  level reaches 0, and its colour then snaps to its default. Each frame its alpha byte is
+  `level × 255 × Alpha`, truncated.
+- **Colour** (`Element::Update`, P `005F5870`): each frame every byte moves `dt /
+  ColorChangeRate` of the way to the default and is rounded, so the return is exponential and
+  stalls about `0.5 × rate / dt` short (9 units at 0.3 s and 60 frames a second).
+  `EventColor` changes the default; with `UseChangeColor`, a change (`EventChanged`,
+  `EventText`, `EventNumber`, `EventBitmap`, a bar's value) snaps the colour to `ColorChange`.
+  Every `ColorPulseRate` seconds of being shown it snaps to `ColorChange` too.
+- **A BarBitmap's change strip** (P `005F7920`, `005F7C30`): once the bar has shown, a change
+  leaves the bar's texture in white over the part it uncovered, fading over
+  `FlashyIncFadeOutTime` or `FlashyDecFadeOutTime` (0, no strip, by default); a shrinking
+  strip's top comes down to `FlashyScale` pixels above its bottom over the first second.
+- **GameExt** (`hud_number_math_core.hpp`): a Lerp moves its share at `1 / RiseTime` or
+  `1 / FallTime` a second toward its input's, starting in the frame of the send; a Compare
+  stays on until its inputs are `Hysteresis` past the other way; `OutputIsAlpha(1)` sends the
+  output again every frame, as an `EventAlpha` lasts one.
+- While the events do not decide what shows, every element starts shown, so colours, pulses,
+  strips and lerps still play out, and the fader does not set the alpha.
+
 ## Code-built elements
 
 `SwbfHudEditor.Core/Layout/HudLayout.Code.cs` builds what six element types draw in code, as
@@ -379,9 +411,9 @@ BorderedBox and MultilineText with all they hold.
 
 ## Not modelled yet
 
-- **Time.** The simulation has no clock: fades (`FadeInTime`, `FadeHoldTime` and the rest) are
-  at their end, a Lerp has reached its input, a Compare's hysteresis is not applied, and
-  `EventChanged`, `ColorChange` flashes and pulse rates are not shown.
+- **Time, in part.** The clock does not run a MultilineText's lines in and out, the segments of
+  a `BarSegmented` fading, a ProceduralBarBitmap's flicker, the map's contested-post flash or
+  the lock-on blink; the game's frame time varies, the clock's is 1/60 s.
 - **The state behind the code-built elements.** Objectives, messages, seats, targets and the
   map's posts and units are samples (`CodeSamples.cs`); the map's level texture, a vehicle's
   seat hardpoints, markers that Lua adds, the lock-on blink and messages scrolling in are not

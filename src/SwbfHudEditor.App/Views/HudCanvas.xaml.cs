@@ -100,6 +100,7 @@ public partial class HudCanvas : UserControl
     public void LoadDocuments(IReadOnlyList<HudDocument> docs, AssetResolver? assets, LocalizationTable? localization = null)
     {
         _documents = docs;
+        _clockStale = true;
         if (_activeDocument is not null && !docs.Contains(_activeDocument)) _activeDocument = null;
         _textures = assets is not null ? new TextureCache(assets) : null;
         _fonts = new TextFonts(assets);
@@ -190,10 +191,54 @@ public partial class HudCanvas : UserControl
     /// </summary>
     public void SetEventState(HudEventState? events)
     {
-        if (_events is not null) _events.Changed -= Events_Changed;
+        if (_events is not null)
+        {
+            _events.Changed -= Events_Changed;
+            _events.ClockChanged -= Events_ClockChanged;
+        }
         _events = events;
-        if (_events is not null) _events.Changed += Events_Changed;
+        _clock = null;
+        if (_events is not null)
+        {
+            _events.Changed += Events_Changed;
+            _events.ClockChanged += Events_ClockChanged;
+        }
         Render();
+    }
+
+    // ---- The clock: the sends replayed at their times, stepped on as it runs --------------------------
+
+    private HudClock? _clock;
+    private long _clockVersion = -1;
+    private bool _clockStale = true;
+    private bool _renderPending;
+
+    /// <summary>The clock at the event state's time: started again when the sends, the files or the mode changed, or time went back.</summary>
+    private HudClock? ClockNow(Func<uint, string?>? localize)
+    {
+        if (_events is null || _graph is null) return null;
+        var allShown = !_showByEvents;
+        if (_clock is null || _clockStale || _clock.AllShown != allShown || _clockVersion != _events.Version ||
+            _clock.Frame > HudClock.FrameFor(_events.Now))
+        {
+            _clock = HudClock.Start(_documents, _graph, _events, localize, allShown);
+            _clockVersion = _events.Version;
+            _clockStale = false;
+        }
+        _clock.RunTo(_events.Now);
+        return _clock;
+    }
+
+    /// <summary>One render for any number of clock ticks queued before it runs.</summary>
+    private void Events_ClockChanged(object? sender, EventArgs e)
+    {
+        if (_renderPending) return;
+        _renderPending = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() =>
+        {
+            _renderPending = false;
+            Render();
+        }));
     }
 
     private bool _showByEvents;
@@ -209,6 +254,7 @@ public partial class HudCanvas : UserControl
         {
             if (_showByEvents == value) return;
             _showByEvents = value;
+            _clockStale = true;
             Render();
         }
     }
@@ -216,7 +262,11 @@ public partial class HudCanvas : UserControl
     private void Events_Changed(object? sender, EventArgs e) => Render();
 
     /// <summary>Re-render without re-parsing or re-resolving assets. Call after an edit or a visibility change.</summary>
-    public void Refresh() => Render();
+    public void Refresh()
+    {
+        _clockStale = true;
+        Render();
+    }
 
     private static bool DefaultRounding(HudTarget target) => target == HudTarget.Vanilla;
 
@@ -325,7 +375,10 @@ public partial class HudCanvas : UserControl
         _graph = HudTransformGraph.From(_documents);
         HudSimulation? simulation = null;
         if (_events is not null && (_showByEvents || _events.Sends.Count > 0))
-            simulation = HudSimulation.Run(_documents, _graph, _events, _localization is { } table ? table.TryGetByHash : null);
+        {
+            Func<uint, string?>? localize = _localization is { } table ? table.TryGetByHash : null;
+            simulation = HudSimulation.Run(_documents, _graph, _events, localize, ClockNow(localize));
+        }
         SimulationUpdated?.Invoke(this, simulation);
 
         _layout = HudLayout.Lay(_documents, new LayoutOptions

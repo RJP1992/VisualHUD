@@ -59,6 +59,8 @@ public partial class MainWindow : Window
     private AssetResolver? _assets;
     private LocalizationTable? _localization;
     private bool _assetListStale = true;
+    // The Elements tab brought forward for a moment to pick a row in its tree.
+    private bool _borrowingTree;
 
     public MainWindow()
     {
@@ -83,7 +85,9 @@ public partial class MainWindow : Window
             _defaultLines = null;
             UpdateTitle();
             RefreshAssetList();
+            RefreshFindList();
         };
+        SetUpFind();
         EventsList.Bind(_events);
         // The events sent always reach the canvas; the Events tab's box decides whether they also show and hide.
         Canvas.SetEventState(_events);
@@ -481,6 +485,7 @@ public partial class MainWindow : Window
         _localization = TryLoadLocalization(_assets);
         Canvas.LoadDocuments(Documents, _assets, _localization);
         RefreshAssetList();
+        RefreshFindList();
         return _localization;
     }
 
@@ -529,8 +534,9 @@ public partial class MainWindow : Window
     private void LeftTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // The lists and boxes inside the tabs raise this too.
-        if (!ReferenceEquals(e.OriginalSource, LeftTabs)) return;
+        if (!ReferenceEquals(e.OriginalSource, LeftTabs) || _borrowingTree) return;
         if (AssetsTab.IsSelected && _assetListStale) RefreshAssetList();
+        if (FindTab.IsSelected && _findListStale) RefreshFindList();
     }
 
     private void AddAssetFolders()
@@ -1958,6 +1964,28 @@ public partial class MainWindow : Window
     /// </summary>
     private TreeViewItem? SelectPath(HudFile file, IReadOnlyList<HudBlock> path)
     {
+        // The tree makes its rows only while it is laid out. With another tab in front (a match picked in
+        // the Find tab, a click on the canvas over the Events tab), the Elements tab comes forward for as
+        // long as picking the row takes, before anything is drawn, and the other goes back.
+        if (!ElementsTab.IsSelected)
+        {
+            var front = LeftTabs.SelectedItem;
+            var focused = Keyboard.FocusedElement;
+            _borrowingTree = true;
+            try
+            {
+                ElementsTab.IsSelected = true;
+                LeftTabs.UpdateLayout();
+                return SelectPath(file, path);
+            }
+            finally
+            {
+                LeftTabs.SelectedItem = front;
+                LeftTabs.UpdateLayout();
+                _borrowingTree = false;
+                if (focused is DependencyObject d && PresentationSource.FromDependencyObject(d) is not null) Keyboard.Focus(focused);
+            }
+        }
         Tree.UpdateLayout();
         if (Tree.ItemContainerGenerator.ContainerFromItem(file) is not TreeViewItem current) return null;
         foreach (var block in path)

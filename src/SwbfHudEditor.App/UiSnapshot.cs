@@ -12,6 +12,7 @@ namespace SwbfHudEditor.App;
 /// opens off screen, never activated, so nothing on the desktop changes.
 /// <code>
 /// VisualHUD.exe --ui-snapshot out.png file.hud... [--ui-size 1600x900] [--ui-select name] [--ui-left events]
+///     [--ui-find text [--ui-replace text]]
 /// </code>
 /// </summary>
 internal static class UiSnapshot
@@ -24,6 +25,8 @@ internal static class UiSnapshot
         var size = new Size(1600, 900);
         string? select = null;
         string? left = null;
+        string? find = null;
+        string? replace = null;
         var files = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
@@ -41,6 +44,12 @@ internal static class UiSnapshot
                     break;
                 case "--ui-left":
                     left = args[++i];
+                    break;
+                case "--ui-find":
+                    find = args[++i];
+                    break;
+                case "--ui-replace":
+                    replace = args[++i];
                     break;
                 default:
                     if (args[i].EndsWith(".hud", StringComparison.OrdinalIgnoreCase)) files.Add(Path.GetFullPath(args[i]));
@@ -66,6 +75,7 @@ internal static class UiSnapshot
             {
                 if (left is not null) window.ShowLeftTab(left);
                 if (select is not null) window.SelectByName(select);
+                if (find is not null) window.ShowFind(find, replace);
                 // Let the background asset scans and the first renders settle.
                 await Task.Delay(2500);
                 window.UpdateLayout();

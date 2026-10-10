@@ -176,6 +176,15 @@ one's for the same key.
 - Each of these, whatever it touches, is one undo step (Ctrl+Z, Ctrl+Y).
 - The box above the tree filters it: the rows whose name or keyword contains the text, and the
   rows that hold them.
+- **Find and replace** (Ctrl+F, Ctrl+H, or the **Find** tab) looks for text in the arguments of the
+  files you opened: element names, events, textures, text keys, and with **Numbers and words**
+  numbers and `true`/`false` too, with **Match case** and **Whole value** to narrow it. The
+  matches are listed under their elements, the text marked, each with what it becomes; untick the
+  ones to leave. **Replace** changes the ticked ones in one undo step. A value that would not
+  read back is left as it is: a number stays a number, and a string cannot take a quote. The
+  transform files loaded with the HUD are left alone unless you open them. A click on a match
+  selects its element, with the Find tab kept in front; a double-click or Enter goes to its box
+  in the Properties panel.
 - In the Properties panel, a colour is a swatch that opens a picker and shows the change as you
   pick; a mode, an alignment, a style, a font or an event is a list, which takes typing too; an
   on/off line is a switch. Up and Down step a number (Shift for ten times or 0.1, Ctrl for 0.001).

@@ -150,6 +150,11 @@
                     <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
                               ToolTip="Screen pixels: they stay the same size at every resolution." />
                 </MenuItem>
+                <Separator />
+                <MenuItem Header="_Find..." Command="{x:Static ApplicationCommands.Find}" InputGestureText="Ctrl+F"
+                          ToolTip="Find text in the arguments of the open files: element names, events, textures, text keys." />
+                <MenuItem Header="R_eplace..." Command="{x:Static ApplicationCommands.Replace}" InputGestureText="Ctrl+H"
+                          ToolTip="Replace text in the arguments of the open files, in one undo step." />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Hide or show the selection" Click="ToggleHide_Click" InputGestureText="H" />
@@ -238,7 +243,7 @@
                 <ColumnDefinition Width="380" MinWidth="260" />
             </Grid.ColumnDefinitions>
             <TabControl x:Name="LeftTabs" Grid.Column="0" SelectionChanged="LeftTabs_SelectionChanged">
-                <TabItem Header="Elements" Tag="Elements">
+                <TabItem x:Name="ElementsTab" Header="Elements" Tag="Elements">
                     <DockPanel>
                         <!-- Find rows by name or keyword; the rows that hold a match stay. -->
                         <Grid DockPanel.Dock="Top" Margin="8,8,8,4">
@@ -309,6 +314,9 @@
                 <TabItem x:Name="AssetsTab" Header="Assets" Tag="Assets">
                     <views:AssetsPanel x:Name="AssetsList" />
                 </TabItem>
+                <TabItem x:Name="FindTab" Header="Find" Tag="Find">
+                    <views:FindPanel x:Name="FindList" />
+                </TabItem>
             </TabControl>
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" />
             <views:HudCanvas x:Name="Canvas" Grid.Column="2"
@@ -346,6 +354,8 @@
     </Window.InputBindings>
     <Window.CommandBindings>
         <CommandBinding Command="{x:Static ApplicationCommands.New}" Executed="New_Executed" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Find}" Executed="Find_Executed" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Replace}" Executed="Find_Executed" />
         <CommandBinding Command="{x:Static ApplicationCommands.Open}" Executed="Open_Executed" />
         <CommandBinding Command="{x:Static ApplicationCommands.Save}" Executed="Save_Executed" CanExecute="Save_CanExecute" />
         <CommandBinding Command="{x:Static ApplicationCommands.SaveAs}" Executed="SaveAs_Executed" CanExecute="Save_CanExecute" />

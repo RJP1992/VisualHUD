@@ -287,6 +287,29 @@ game, by GameExt, or by a transform), its type, and who reads it.
 
 The rules are in [docs/Engine.md](docs/Engine.md#events).
 
+## Problems
+
+The **Problems** tab lists what the game reads otherwise than the files you opened seem to say,
+under the elements it is in. A click on one selects its element, with the tab kept in front; a
+double-click or Enter goes to its line in the Properties panel. It follows every edit.
+
+- **Errors**: what the game makes nothing of (an element in an element that holds none) and a
+  `FileInfo` whose `SplitMode` keeps the file from loading.
+- **Warnings**: a line or a block the element does not read; a unit that names nothing (a
+  `Position`'s reads as Pixels) and a `BitmapRect` with more than five arguments, whose unit is
+  not read; a texture, model or font not found; an event that shows an element but that nothing
+  sends (not the game, GameExt or a transform in the files loaded; each player's events count);
+  `InheritMeshInfo` naming no model made before it, or a table whose positions are not in Pixels
+  and are converted again; a `VehicleSeating`'s own `Position` in a unit (it is read as pixels);
+  a `Viewport` line inside a group that says otherwise than the group; a group's `BlendMode`
+  before its children, which changes nothing; a `MultilineText` without `NumLines`; an
+  `ObjectiveList` not named `playerNobjectives`.
+- **Notes**, shown with the box ticked: what the game does its own way, often meant. A Target's,
+  a MultilineText's or a Map's replaced `Position`, `Rotation`, `Scale` or `TextBox`; a model's
+  `Position`, `Rotation` or `Depth` before its `Mesh`; a model's `BlendMode`; a group's
+  `BlendMode` between its children; a name another element in the same view has; an event read
+  that nothing sends; a transform inside an element; a `FileInfo`'s `Widescreen`.
+
 ## Snapshots
 
 The canvas can be rendered to a PNG without opening a window:

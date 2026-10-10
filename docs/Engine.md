@@ -71,6 +71,15 @@ The editor keeps transforms to the top of a file and to ViewPorts, where `hudtra
 has them and where the event simulation reads them. A `FileInfo` goes first: the game reads it
 to decide whether to load the file at all.
 
+`HUD::ConfigFile::ReadData` (P `00619FB0`, M `006B7F50`) reads three keys, and
+`HUD::Manager::Load` (P `00619510`, M `006B8480`) drops the rest of the file when one says no:
+
+- `Viewports(n, ...)`, up to four: the file loads only when the number of cameras is one of them.
+- `SplitMode("Horizontal" | "Vertical", ...)`, up to two: the file loads only when `"Vertical"`
+  is one of them (the game compares with 1, the index of `"Vertical"`).
+- `Widescreen(b)`: the file loads only when the game's widescreen setting (`gWidescreenEnabled`)
+  is `b`. Modtools takes the setting as on.
+
 ## Setup: what each element's PostReadSetup leaves
 
 `HUD::ConvertRelativeToPixels(mode, value, frame, view, screen)` (M `00691120`):

@@ -321,6 +321,9 @@
                 <TabItem x:Name="FindTab" Header="Find" Tag="Find">
                     <views:FindPanel x:Name="FindList" />
                 </TabItem>
+                <TabItem x:Name="ProblemsTab" Header="Problems" Tag="Problems">
+                    <views:ProblemsPanel x:Name="ProblemList" />
+                </TabItem>
             </TabControl>
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" />
             <views:HudCanvas x:Name="Canvas" Grid.Column="2"

@@ -372,6 +372,10 @@ public static class PropertyCatalog
 
         // ---- Not elements: FileInfo and ViewPort ----
         Add("FileInfo", "File", "Viewports", "The split-screen view counts the file is for, such as (1) or (1, 2, 3, 4).", () => Leaf("Viewports", I(1)));
+        Add("FileInfo", "File", "SplitMode", "The split-screen layouts the file is for, \"Horizontal\" or \"Vertical\" or both: the game loads it only when \"Vertical\" is one.",
+            () => Leaf("SplitMode", S("Vertical")));
+        Add("FileInfo", "File", "Widescreen", "1 loads the file only with the game's widescreen setting on, 0 only with it off. Modtools takes it as on.",
+            () => Leaf("Widescreen", I(1)));
         Add("FileInfo", "GameExt", "AuthoredRatio", "GameExt: (w, h), the screen shape the file was made for, such as (16, 9). The file is laid out at its real height and slid across a wider screen.", () => Leaf("AuthoredRatio", I(16), I(9)));
         Add("FileInfo", "GameExt", "TrueWidescreen", "GameExt: 1 lays a 4:3 file out at its real height on a wider screen; AuthoredRatio for other shapes.", () => Leaf("TrueWidescreen", I(1)));
         Add("ViewPort", "File", "EventNameFilter", "Reads the block again for each player's camera, swapping % in event names for the player's number.", () => Leaf("EventNameFilter", S("player%")));
@@ -416,6 +420,9 @@ public static class PropertyCatalog
             .OrderBy(d => readers.IndexOf(d.Reader))
             .FirstOrDefault();
     }
+
+    /// <summary>Whether the catalog knows what reads <paramref name="target"/>'s lines, so a line it lacks is one the game ignores.</summary>
+    public static bool ReadsLines(HudBlock target, HudBlock? parent) => ReadersOf(target, parent).Count > 0;
 
     /// <summary>The classes whose ReadData reads a block's lines, the subclass first.</summary>
     private static List<string> ReadersOf(HudBlock target, HudBlock? parent)

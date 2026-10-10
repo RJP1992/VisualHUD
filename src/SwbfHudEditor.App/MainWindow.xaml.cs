@@ -86,8 +86,10 @@ public partial class MainWindow : Window
             UpdateTitle();
             RefreshAssetList();
             RefreshFindList();
+            RefreshProblemList();
         };
         SetUpFind();
+        SetUpProblems();
         SetUpArrange();
         EventsList.Bind(_events);
         // The events sent always reach the canvas; the Events tab's box decides whether they also show and hide.
@@ -487,6 +489,7 @@ public partial class MainWindow : Window
         Canvas.LoadDocuments(Documents, _assets, _localization);
         RefreshAssetList();
         RefreshFindList();
+        RefreshProblemList();
         return _localization;
     }
 
@@ -538,6 +541,7 @@ public partial class MainWindow : Window
         if (!ReferenceEquals(e.OriginalSource, LeftTabs) || _borrowingTree) return;
         if (AssetsTab.IsSelected && _assetListStale) RefreshAssetList();
         if (FindTab.IsSelected && _findListStale) RefreshFindList();
+        if (ProblemsTab.IsSelected && _problemListStale) RefreshProblemList();
     }
 
     private void AddAssetFolders()

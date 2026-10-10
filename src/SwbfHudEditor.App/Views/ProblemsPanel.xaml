@@ -1,0 +1,51 @@
+<UserControl x:Class="SwbfHudEditor.App.Views.ProblemsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource PanelBrush}">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="10,10,10,6">
+            <DockPanel>
+                <CheckBox x:Name="NotesBox" DockPanel.Dock="Right" Content="Notes" Margin="8,0,0,0" VerticalAlignment="Center"
+                          Checked="Filter_Changed" Unchecked="Filter_Changed"
+                          ToolTip="Show the notes too: what the game does its own way, worth knowing though often meant, such as a Target replacing its templates' Position." />
+                <TextBlock x:Name="SummaryText" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{StaticResource TextBrush}"
+                           Text="Open a HUD to check it." />
+            </DockPanel>
+            <TextBlock Text="What the game reads otherwise than the files you opened seem to say. A click shows where; a double-click or Enter goes to the line in the Properties panel."
+                       Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+        </StackPanel>
+        <ListBox x:Name="ProblemList" SelectionMode="Single" SelectionChanged="ProblemList_SelectionChanged"
+                 MouseDoubleClick="ProblemList_MouseDoubleClick" KeyDown="ProblemList_KeyDown"
+                 HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
+            <ListBox.GroupStyle>
+                <GroupStyle>
+                    <GroupStyle.HeaderTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="4,8,4,2">
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding Name.File}" Foreground="{StaticResource TextMutedBrush}"
+                                           FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding Name.Title}" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+            </ListBox.GroupStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <DockPanel Margin="0,2">
+                        <TextBlock DockPanel.Dock="Left" Text="{Binding Icon}" Style="{StaticResource Icon}" Foreground="{Binding IconBrush}"
+                                   VerticalAlignment="Top" Margin="0,2,8,0" ToolTip="{Binding LevelName}" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Text="{Binding Line}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextMutedBrush}"
+                                       TextTrimming="CharacterEllipsis" Visibility="{Binding LineVisibility}" Margin="0,1,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</UserControl>

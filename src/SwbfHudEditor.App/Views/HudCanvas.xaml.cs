@@ -237,6 +237,7 @@ public partial class HudCanvas : UserControl
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() =>
         {
             _renderPending = false;
+            _reuseVisuals = true;
             Render();
         }));
     }
@@ -259,7 +260,11 @@ public partial class HudCanvas : UserControl
         }
     }
 
-    private void Events_Changed(object? sender, EventArgs e) => Render();
+    private void Events_Changed(object? sender, EventArgs e)
+    {
+        _reuseVisuals = true;
+        Render();
+    }
 
     /// <summary>Re-render without re-parsing or re-resolving assets. Call after an edit or a visibility change.</summary>
     public void Refresh()
@@ -358,15 +363,88 @@ public partial class HudCanvas : UserControl
 
     // ---- Rendering ------------------------------------------------------------------------------
 
+    // ---- Reusing visuals: while only values change (the clock running, events sent), an element whose
+    // drawing is the same keeps its visual, and only the others are made again -------------------------
+
+    /// <summary>An element, or the <c>Piece</c>th piece its code built.</summary>
+    private readonly record struct VisualId(HudBlock Block, int Piece);
+
+    /// <summary>Everything a value can change about how an element is drawn.</summary>
+    private readonly record struct VisualSignature(ElementKind Kind, string? Texture, QuadRect? Quad, TexRect Uv, Vector3 Color,
+        float Alpha, Matrix4x4 ToScreen, Matrix4x4 World, string? Mesh, float Depth, string? Mask, TexRect MaskUv, string? Text,
+        int BoxWidth, int BoxHeight, bool Shown, bool Simulated, int Segments);
+
+    private readonly Dictionary<VisualId, (VisualSignature Signature, FrameworkElement? Visual)> _visualCache = new();
+    private bool _reuseVisuals;
+
+    private static VisualId IdOf(LaidOutElement e) =>
+        e.Piece is { } p ? new VisualId(p.Owner.Block, p.Owner.Children.IndexOf(e)) : new VisualId(e.Block, -1);
+
+    private VisualSignature SignatureOf(LaidOutElement e)
+    {
+        var segments = 0;
+        if (e.Segments.Count > 0)
+        {
+            var hash = new HashCode();
+            foreach (var segment in e.Segments)
+            {
+                hash.Add(segment.Lit);
+                hash.Add(segment.ToScreen);
+            }
+            segments = hash.ToHashCode();
+        }
+        return new VisualSignature(e.Kind, e.Texture, e.Quad, e.Uv, e.DrawColor, e.DrawAlpha, e.ToScreen,
+            e.Kind == ElementKind.Model3D ? e.World : default, e.Mesh, e.MeshDepth, e.Mask, e.MaskUv,
+            e.Kind == ElementKind.Text ? e.Text ?? ShownText(e) : null, e.TextBoxWidth, e.TextBoxHeight, e.Shown,
+            e.Runtime is not null, segments);
+    }
+
+    /// <summary>The visual an element is drawn with, for tests.</summary>
+    internal FrameworkElement? VisualOf(HudBlock block) => _visuals.TryGetValue(block, out var v) ? v : null;
+
+    /// <summary>An element's visual, made and put on the canvas.</summary>
+    private FrameworkElement? MakeVisual(LaidOutElement e)
+    {
+        var visual = CreateVisual(e);
+        if (visual is null) return null;
+        if (!e.Shown) visual.Opacity *= 0.2;
+        visual.Tag = e.PickBlock;
+        visual.MouseEnter += Visual_MouseEnter;
+        visual.MouseLeave += Visual_MouseLeave;
+        visual.Cursor = Cursors.SizeAll;
+        ToolTipService.SetToolTip(visual, e.Piece is { } piece
+            ? $"{piece.Owner.Block}: {(piece.Template is { } t ? t.Name : e.Kind.ToString())}, drawn by the game's code"
+            : e.Block.ToString());
+        Panel.SetZIndex(visual, e.DrawIndex);
+        CanvasSurface.Children.Add(visual);
+        _visuals[e.Block] = visual;
+        return visual;
+    }
+
     private void Render()
     {
         if (!_ready) return;
-        CanvasSurface.Children.Clear();
+        var reuse = _reuseVisuals;
+        _reuseVisuals = false;
+        if (reuse)
+        {
+            // The elements' visuals stay; the guides, the reference and the highlights are drawn again.
+            for (var i = CanvasSurface.Children.Count - 1; i >= 0; i--)
+                if (CanvasSurface.Children[i] is not FrameworkElement { Tag: HudBlock })
+                    CanvasSurface.Children.RemoveAt(i);
+        }
+        else
+        {
+            CanvasSurface.Children.Clear();
+            _visualCache.Clear();
+        }
         _visuals.Clear();
         _highlight.Clear();
         _layout = null;
         if (_documents.Count == 0)
         {
+            CanvasSurface.Children.Clear();
+            _visualCache.Clear();
             LayoutInfoText.Text = string.Empty;
             LayoutInfoText.ToolTip = null;
             return;
@@ -407,24 +485,36 @@ public partial class HudCanvas : UserControl
         if (GuidesBox.IsChecked == true) DrawGuides(_layout.Options.Screen, described.Layout);
 
         var showHidden = ShowHiddenBox.IsChecked == true;
+        var seen = new HashSet<VisualId>();
         foreach (var e in _layout.All.OrderBy(e => e.DrawIndex))
         {
             if (!IsShown(e)) continue;
             // An element its events have not enabled is not drawn, or drawn faintly to keep it in reach.
             if (!e.Shown && !showHidden) continue;
-            var visual = CreateVisual(e);
-            if (visual is null) continue;
-            if (!e.Shown) visual.Opacity *= 0.2;
-            visual.Tag = e.PickBlock;
-            visual.MouseEnter += Visual_MouseEnter;
-            visual.MouseLeave += Visual_MouseLeave;
-            visual.Cursor = Cursors.SizeAll;
-            ToolTipService.SetToolTip(visual, e.Piece is { } piece
-                ? $"{piece.Owner.Block}: {(piece.Template is { } t ? t.Name : e.Kind.ToString())}, drawn by the game's code"
-                : e.Block.ToString());
-            Panel.SetZIndex(visual, e.DrawIndex);
-            CanvasSurface.Children.Add(visual);
-            _visuals[e.Block] = visual;
+            var id = IdOf(e);
+            var signature = SignatureOf(e);
+            seen.Add(id);
+            if (_visualCache.TryGetValue(id, out var cached))
+            {
+                if (cached.Signature == signature)
+                {
+                    if (cached.Visual is { } kept)
+                    {
+                        Panel.SetZIndex(kept, e.DrawIndex);
+                        _visuals[e.Block] = kept;
+                    }
+                    continue;
+                }
+                if (cached.Visual is { } old) CanvasSurface.Children.Remove(old);
+            }
+            _visualCache[id] = (signature, MakeVisual(e));
+        }
+        // What is no longer drawn.
+        foreach (var (id, cached) in _visualCache.ToList())
+        {
+            if (seen.Contains(id)) continue;
+            if (cached.Visual is { } stale) CanvasSurface.Children.Remove(stale);
+            _visualCache.Remove(id);
         }
 
         DrawHighlights();

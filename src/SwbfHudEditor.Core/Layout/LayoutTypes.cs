@@ -19,6 +19,15 @@ public sealed record LayoutOptions
     public HudTarget Target { get; init; } = HudTarget.GameExt;
 
     /// <summary>
+    /// A font's metrics by its <c>TextFont</c> name, for the elements whose code stacks lines by their
+    /// height (ObjectiveList, MultilineText, VehicleSeating). Without one, a plain stand-in is used.
+    /// </summary>
+    public Func<string?, Assets.ITextFont?>? Fonts { get; init; }
+
+    /// <summary>A texture's size in texels, by name, for a BorderedBox's border; null when it is not found.</summary>
+    public Func<string, (int Width, int Height)?>? TextureSize { get; init; }
+
+    /// <summary>
     /// The draw's rounding of every element to whole interface units (1/640 of the width). Null: by
     /// target, as each ships: stock rounds, GameExt's <c>HudSubPixel</c> (on by default) does not.
     /// </summary>
@@ -132,11 +141,32 @@ public enum PieceRole
 /// <summary>One segment of a <c>BarSegmented</c>, placed as its <c>SetValue</c> places it.</summary>
 public readonly record struct SegmentDraw(int Index, bool Lit, Matrix4x4 Local, Matrix4x4 World, Matrix4x4 ToScreen);
 
+/// <summary>
+/// A piece the game builds in code for an element: a box's frame, a list's lines, a seat, a target
+/// marker, a map's backdrop and icons. <paramref name="Template"/> is the block it copies, if any;
+/// <paramref name="ZOrder"/> is the z-order it joins its element's children with.
+/// </summary>
+public sealed record CodePiece(LaidOutElement Owner, HudBlock? Template, int ZOrder, CodePieceRole Role = CodePieceRole.Other);
+
+/// <summary>What a code-built piece is, where the canvas draws one kind differently.</summary>
+public enum CodePieceRole
+{
+    Other,
+    /// <summary>The map's backdrop: the level's map, which the editor does not have.</summary>
+    MapBackdrop,
+}
+
 /// <summary>An element as the game lays it out and draws it.</summary>
 public sealed class LaidOutElement
 {
     public required ElementSpec Spec { get; init; }
     public HudBlock Block => Spec.Block;
+
+    /// <summary>Set for a piece the game builds in code rather than a block of the file.</summary>
+    public CodePiece? Piece { get; init; }
+
+    /// <summary>The block a click on it picks: a piece's template, else the element that made it, else its own.</summary>
+    public HudBlock PickBlock => Piece is { } p ? p.Template ?? p.Owner.Block : Block;
     public ElementKind Kind => Spec.Kind;
     public LaidOutElement? Parent { get; init; }
 
@@ -188,6 +218,10 @@ public sealed class LaidOutElement
     /// <see cref="Local"/> only for a model whose <c>MeshInfo</c> is shown.
     /// </summary>
     public Matrix4x4 LoadLocal { get; set; }
+
+    /// <summary>A masked bitmap's mask texture and the part of it its quad shows (<c>Mask</c>, <c>MaskTexCoords</c>).</summary>
+    public string? Mask { get; set; }
+    public TexRect MaskUv { get; set; } = TexRect.Full;
 
     /// <summary>A model's mesh as shown, and the <c>MeshInfo</c> that placed it, if any.</summary>
     public string? Mesh { get; set; }

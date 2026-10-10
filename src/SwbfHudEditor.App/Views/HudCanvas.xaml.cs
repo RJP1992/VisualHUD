@@ -338,6 +338,8 @@ public partial class HudCanvas : UserControl
             ModelMesh = ChooseMesh,
             Simulation = simulation,
             ShowByEvents = _showByEvents,
+            Fonts = name => _fonts.For(name).Metrics,
+            TextureSize = name => _textures?.Get(name) is { } t ? (t.PixelWidth, t.PixelHeight) : null,
         });
         // The layout line and the guides are for one file: the active one, else the first with elements.
         var withElements = _layout.Files.Where(f => HudLayout.TopLevelElements(f.Document).Any()).ToList();
@@ -360,11 +362,13 @@ public partial class HudCanvas : UserControl
             var visual = CreateVisual(e);
             if (visual is null) continue;
             if (!e.Shown) visual.Opacity *= 0.2;
-            visual.Tag = e.Block;
+            visual.Tag = e.PickBlock;
             visual.MouseEnter += Visual_MouseEnter;
             visual.MouseLeave += Visual_MouseLeave;
             visual.Cursor = Cursors.SizeAll;
-            ToolTipService.SetToolTip(visual, e.Block.ToString());
+            ToolTipService.SetToolTip(visual, e.Piece is { } piece
+                ? $"{piece.Owner.Block}: {(piece.Template is { } t ? t.Name : e.Kind.ToString())}, drawn by the game's code"
+                : e.Block.ToString());
             Panel.SetZIndex(visual, e.DrawIndex);
             CanvasSurface.Children.Add(visual);
             _visuals[e.Block] = visual;
@@ -427,9 +431,10 @@ public partial class HudCanvas : UserControl
             case ElementKind.BitmapMasked:
             case ElementKind.BarBitmap:
             case ElementKind.ProceduralBarBitmap:
-                return e.Quad is { } quad
-                    ? QuadVisual(e.Spec, e.Texture, quad, e.Uv, e.ToScreen, e.DrawColor, e.DrawAlpha, LabelFor(e))
-                    : null;
+                if (e.Quad is not { } quad) return null;
+                if (e.Piece?.Role == CodePieceRole.MapBackdrop)
+                    return QuadVisual(e.Spec, SampleMapName, quad, e.Uv, e.ToScreen, e.DrawColor, e.DrawAlpha, LabelFor(e), e.Mask, e.MaskUv);
+                return QuadVisual(e.Spec, e.Texture, quad, e.Uv, e.ToScreen, e.DrawColor, e.DrawAlpha, LabelFor(e), e.Mask, e.MaskUv);
             case ElementKind.Text:
                 return TextVisual(e);
             case ElementKind.Model3D:
@@ -439,8 +444,9 @@ public partial class HudCanvas : UserControl
             case ElementKind.Group:
                 return null;
             default:
-                // Map, Target, lists and boxes: drawn by code the preview does not run yet.
-                return ShowPlaceholders ? FrameVisual(e) : null;
+                // Map, Target, lists and boxes: their code draws pieces of its own, which follow; the Rect is
+                // outlined only when there are none.
+                return ShowPlaceholders && !e.Children.Any(c => c.Piece is not null) ? FrameVisual(e) : null;
         }
     }
 
@@ -459,7 +465,7 @@ public partial class HudCanvas : UserControl
     /// left or bottom to top (a FillFrom bar, a flipped TexCoords) keeps each edge's coordinate.
     /// </summary>
     private FrameworkElement? QuadVisual(ElementSpec spec, string? textureName, QuadRect quad, TexRect uv, Matrix4x4 toScreen,
-        Vector3 color, float alpha, string label)
+        Vector3 color, float alpha, string label, string? mask = null, TexRect? maskUv = null)
     {
         var (x0, u0, x1, u1) = quad.Left <= quad.Right ? (quad.Left, uv.U0, quad.Right, uv.U1) : (quad.Right, uv.U1, quad.Left, uv.U0);
         var (y0, v0, y1, v1) = quad.Top <= quad.Bottom ? (quad.Top, uv.V0, quad.Bottom, uv.V1) : (quad.Bottom, uv.V1, quad.Top, uv.V0);
@@ -470,7 +476,7 @@ public partial class HudCanvas : UserControl
             return ShowPlaceholders && !spec.HasBitmapRect ? MarkerVisual(toScreen, label + "  (no BitmapRect)") : null;
         }
 
-        var texture = textureName is { Length: > 0 } name ? _textures?.Get(name) : null;
+        var texture = textureName == SampleMapName ? SampleMap() : textureName is { Length: > 0 } name ? _textures?.Get(name) : null;
         FrameworkElement visual;
         if (texture is null)
         {
@@ -489,6 +495,19 @@ public partial class HudCanvas : UserControl
             if (u1 < u0 || v1 < v0) brush.RelativeTransform = new ScaleTransform(u1 < u0 ? -1 : 1, v1 < v0 ? -1 : 1, 0.5, 0.5);
             brush.Freeze();
             visual = new Rectangle { Width = w, Height = h, Fill = brush, Opacity = Math.Clamp(alpha, 0.0, 1.0) };
+            // A masked bitmap: the mask's alpha multiplies it, the part MaskTexCoords gives over the quad.
+            if (mask is { Length: > 0 } && _textures?.Get(mask) is { } maskTexture)
+            {
+                var m = maskUv ?? TexRect.Full;
+                var maskBrush = new ImageBrush(maskTexture)
+                {
+                    Stretch = Stretch.Fill,
+                    ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+                    Viewbox = new Rect(Math.Min(m.U0, m.U1), Math.Min(m.V0, m.V1), Math.Max(Math.Abs(m.U1 - m.U0), 1e-6), Math.Max(Math.Abs(m.V1 - m.V0), 1e-6)),
+                };
+                maskBrush.Freeze();
+                visual.OpacityMask = maskBrush;
+            }
         }
         visual.RenderTransform = new MatrixTransform(ToWpf(Matrix4x4.CreateTranslation(x0, y0, 0f) * toScreen));
         return visual;
@@ -639,7 +658,50 @@ public partial class HudCanvas : UserControl
         Padding = new Thickness(2, 0, 2, 0),
     };
 
-    private static string LabelFor(LaidOutElement e) => $"{e.Kind}  {e.Spec.Name ?? "(unnamed)"}";
+    private static string LabelFor(LaidOutElement e) => e.Piece is { } piece
+        ? $"{piece.Owner.Kind}  {piece.Owner.Spec.Name ?? "(unnamed)"}: {piece.Template?.Name ?? e.Kind.ToString()}"
+        : $"{e.Kind}  {e.Spec.Name ?? "(unnamed)"}";
+
+    // ---- The map's backdrop: the level's map, which the editor has only when a level's folder is added ----
+
+    private const string SampleMapName = "$level map";
+
+    /// <summary>Level maps tried in turn for the map's backdrop.</summary>
+    private static readonly string[] LevelMaps = { "geo1_map", "tat2_map", "kas2_map", "cor1_map", "nab2_map", "yav1_map", "dag1_map", "fel1_map" };
+
+    private BitmapSource? _sampleMap;
+
+    /// <summary>A level's map from the asset folders, else a drawn stand-in: terrain-like blotches under a grid.</summary>
+    private BitmapSource SampleMap()
+    {
+        foreach (var name in LevelMaps)
+            if (_textures?.Get(name) is { } found)
+                return found;
+        if (_sampleMap is not null) return _sampleMap;
+        const int size = 256;
+        var pixels = new byte[size * size * 4];
+        var random = new Random(7);
+        var blobs = Enumerable.Range(0, 14).Select(_ => (X: random.NextDouble() * size, Y: random.NextDouble() * size, R: 20 + random.NextDouble() * 50, Hill: random.NextDouble())).ToArray();
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+            {
+                var hill = 0.0;
+                foreach (var b in blobs)
+                {
+                    var d = Math.Sqrt((x - b.X) * (x - b.X) + (y - b.Y) * (y - b.Y)) / b.R;
+                    if (d < 1) hill = Math.Max(hill, (1 - d) * (0.4 + 0.6 * b.Hill));
+                }
+                var grid = x % 32 == 0 || y % 32 == 0;
+                var i = (y * size + x) * 4;
+                pixels[i] = (byte)(grid ? 170 : 100 + 50 * hill);       // B
+                pixels[i + 1] = (byte)(grid ? 185 : 135 + 80 * hill);   // G
+                pixels[i + 2] = (byte)(grid ? 170 : 120 + 70 * hill);   // R
+                pixels[i + 3] = 255;
+            }
+        var bitmap = BitmapSource.Create(size, size, 96, 96, PixelFormats.Bgra32, null, pixels, size * 4);
+        bitmap.Freeze();
+        return _sampleMap = bitmap;
+    }
 
     private static Color ToColor(Vector3 c) =>
         Color.FromRgb((byte)Math.Clamp(c.X * 255f + 0.5f, 0, 255), (byte)Math.Clamp(c.Y * 255f + 0.5f, 0, 255), (byte)Math.Clamp(c.Z * 255f + 0.5f, 0, 255));

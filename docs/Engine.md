@@ -185,6 +185,60 @@ Then:
   modelled: models are drawn unlit, textured and coloured by their vertices, nearer
   surfaces over farther ones.
 
+## Code-built elements
+
+`SwbfHudEditor.Core/Layout/HudLayout.Code.cs` builds what six element types draw in code, as
+children of the element. Each joins the element's children with its own z-order, after the
+file's children (a lower `ZOrder` draws on top, as for any child). A click on one picks its
+template, or the element when it has none. Where they show the game's state, typical values
+stand in for it (`CodeSamples.cs`).
+
+- **BorderedBox** (P `005EDCE0`; modtools builds one element, M `0068D900`, and rounds the
+  edges): nine cells of its `Background`. The `Rect` is the middle cell; the border lies
+  outside it, `Border` texels of the texture drawn `Border` pixels wide. White, z-order 128,
+  no bitmap stretch, tinted by the box. Nothing draws without the texture.
+- **ObjectiveList** (P `0061AE20`, M `006B9790`): each active (yellow 223, 223, 32) or
+  completed (grey 128) objective in gamefont_tiny, no shadow, word-wrapped 16 pixels narrower
+  than the `Rect`, 8 pixels in from the left and top and 2 apart, oldest at the top. The
+  newest that fit are kept, and the newest always shows.
+- **MultilineText** (P `006083B0`, `00607180`): `NumLines` copies of its `Format` (`NumLines`
+  is 0 by default: nothing shows), each one wrapped line in a box the `Rect`'s width and a
+  line tall; the `Format`'s own `TextBox` and `Position` are replaced. Settled, with
+  `AddToTop(1)` the oldest line is at the top and each next one below it; without, the newest
+  is at the bottom. `EventColor` colours every line added after it, until the next one. The
+  editor shows the text its `EventText` was sent, else sample messages.
+- **VehicleSeating** (P `0060E8C0`, M `006ABC70`): each seat a copy of the icon and name
+  templates for its state (`Empty`, `Self`, `Player`, `AI`). The driver's seat is at the
+  element's origin, each next seat higher by the previous name's font cell. A name is
+  centred on its seat, and modtools draws every icon at 0.4 of its template. The element's own
+  `Position` is read as pixels whatever its mode, without its `Rect`'s alignment, as its
+  `PostReadSetup` (P `0060E1D0`) calls no base.
+- **Target** (P `0060A360`): each marker a copy of its state's template, placed by code at
+  the target's point in the element's `Rect` (viewport shares, the whole view by default). It is
+  scaled from `MinScale` (2 by default) at 100 m to `MaxScale` (0.1) at 500 m for a player
+  target, or at 10000 m for an objective or flag. An off-screen marker sits on the 0.9 square,
+  turned by `atan2(x, -y)` to point out. The template's own `Position`, `Rotation` and `Scale`
+  are replaced; `ColorFriendly` colours a friendly target. `LockedOnScreen` and
+  `LockedOnScreenBehind` are forced to `Right`, `Bottom`; with `FourSegmentLockOn(1)` a locked
+  target is four of them at the corners, a quarter turn apart, at 1.2.
+- **Map** (P `005FCFD0`, `006021F0`): the group at its mode's position (`PositionSmall`,
+  `PositionLarge`, `PositionSpawn`; its own `Position` is replaced), turned and scaled as
+  loaded. Modtools scales the group `1 + (k - 1)/4` tall on a screen wider than 4:3
+  (`k = 0.75 W/H`, M `0069B920`).
+  - The backdrop is a square 0.22, 0.75 or 0.65 of the view's height (unless its template has a
+    `BitmapRect`). It shows the level's `<terrain>_map` through `map_mask`, at alpha 0.5 and
+    z-order 255. The editor draws a level map from the asset folders, or a stand-in.
+  - The north pointer sits at the top of the backdrop: 6 pixels square on its bottom edge,
+    scaled by its template.
+  - The view cone is the player's FOV model, lying in its x-z plane.
+  - Command posts are 6-pixel icons at their `MapScale`, pinned to the rim, in their team's
+    colour. Each number sits 5 pixels above its post and, on the minimap, fades toward the rim.
+  - Units show inside only: friends always, enemies while they fire, in white.
+  - The minimap shows 125 m around the player on foot. The mode is what `EventChangeMapMode`
+    was sent, else the minimap.
+- **BitmapMasked**: the `Mask` texture's alpha multiplies the bitmap, the part
+  `MaskTexCoords` gives laid over its quad.
+
 ## Text
 
 `SwbfHudEditor.Core/Layout/TextLayout.cs` ports the game's text layout; the font comes from its
@@ -325,13 +379,13 @@ BorderedBox and MultilineText with all they hold.
 
 ## Not modelled yet
 
-- **Map, Target, MultilineText, ObjectiveList, VehicleSeating, BorderedBox** draw from
-  code the preview does not run; they show as outlines of their Rect.
 - **Time.** The simulation has no clock: fades (`FadeInTime`, `FadeHoldTime` and the rest) are
   at their end, a Lerp has reached its input, a Compare's hysteresis is not applied, and
   `EventChanged`, `ColorChange` flashes and pulse rates are not shown.
-- **Code-driven elements.** What the Map, Target, VehicleSeating, ObjectiveList and
-  MultilineText elements draw from the game's state.
+- **The state behind the code-built elements.** Objectives, messages, seats, targets and the
+  map's posts and units are samples (`CodeSamples.cs`); the map's level texture, a vehicle's
+  seat hardpoints, markers that Lua adds, the lock-on blink and messages scrolling in are not
+  drawn.
 - **ReticleCorrection.** GameExt shifts `player1.weaponN.reticule.position`'s y for stock files
   on a wide screen; the editor sends the value as typed.
 - **Perspective for flat elements.** Depth is dropped for bitmaps and text: one tilted out

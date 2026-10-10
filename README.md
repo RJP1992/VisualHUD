@@ -106,6 +106,11 @@ one's for the same key.
   [Events](#events)).
 - The ⚙ button holds **HUD scale**, which resizes `Scalable(1)` elements as the game's video
   option does.
+- The elements the game draws in code are drawn as their code lays them out: a BorderedBox's
+  frame, an ObjectiveList's objectives, a MultilineText's lines, a VehicleSeating's seats, a
+  Target's markers and the Map's backdrop, north pointer, view cone, posts and units, with
+  sample objectives, messages, seats, targets, posts and units. A sent `EventChangeMapMode`
+  shows the large or spawn map; a sent `EventText` shows in a MultilineText.
 - Models are drawn as the game draws them, through its camera: one mesh unit is
   `W / (640 × Depth)` pixels across (300 at 1920 wide), a nearer part is larger, and a
   `MeshInfo` places only a mesh its event sends. See [docs/Engine.md](docs/Engine.md#models).

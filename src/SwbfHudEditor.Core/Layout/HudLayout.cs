@@ -8,7 +8,7 @@ namespace SwbfHudEditor.Core.Layout;
 /// <c>PostReadSetup</c> does, GameExt's placement for an opted-in file, then the draw's matrices down
 /// to the screen. The rules and every address are in <c>docs/Engine.md</c>.
 /// </summary>
-public static class HudLayout
+public static partial class HudLayout
 {
     private static readonly float[] AlignShare = { 0f, 0.5f, 1f };
 
@@ -183,6 +183,11 @@ public static class HudLayout
             e.FullQuad = quad;
             e.Uv = spec.TexCoords;
             e.Quad = quad;
+            if (kind == ElementKind.BitmapMasked)
+            {
+                e.Mask = spec.Mask;
+                e.MaskUv = spec.MaskTexCoords;
+            }
             if (kind is ElementKind.BarBitmap or ElementKind.ProceduralBarBitmap) FillBar(ctx, e);
             // The stock widening stretch on the bitmap's own axes.
             local = EngineMath.ScaleOwnAxes(local, 1f, ctx.Stretch);
@@ -233,6 +238,7 @@ public static class HudLayout
                 e.Children.Add(Build(ctx, child, childKind, e, depth + 1));
 
         if (kind == ElementKind.BarSegmented) LayOutSegments(ctx, e);
+        AddCodePieces(ctx, e);
         return e;
     }
 
@@ -604,6 +610,12 @@ public static class HudLayout
                 // enabled (HUD::Element::UpdateEnableState, P 005F5C00), after its ZOrder line set the
                 // z-order outside any list: it goes after every element of an equal or higher one.
                 InsertAfterEqual(list, e, e.Spec.ZOrder);
+                continue;
+            }
+            if (e.Piece is { } piece)
+            {
+                // Made in code with its z-order already set, then added.
+                InsertAfterEqual(list, e, piece.ZOrder);
                 continue;
             }
             InsertAfterEqual(list, e, startingZOrder);

@@ -212,6 +212,14 @@ public sealed class ElementSpec
         }
     }
 
+    // ---- BitmapMasked ---------------------------------------------------------------------------
+
+    /// <summary><c>Mask("texture")</c>: its alpha multiplies the bitmap.</summary>
+    public string? Mask { get; set; }
+
+    /// <summary><c>MaskTexCoords(u0, v0, u1, v1)</c>: the part of the mask over the quad.</summary>
+    public TexRect MaskTexCoords { get; set; } = TexRect.Full;
+
     // ---- Model3D --------------------------------------------------------------------------------
 
     /// <summary><c>Mesh("name")</c>: the model set as the file loads.</summary>
@@ -545,6 +553,15 @@ public static class ElementReader
                 break;
             case "EventAlpha" when n >= 1 && ElementKinds.IsGroupBased(s.Kind):
                 s.EventAlpha = EngineArgs.String(line.Arguments[0]);
+                break;
+
+            // ---- BitmapMasked ----
+            case "Mask" when n >= 1:
+                s.Mask = EngineArgs.String(line.Arguments[0]);
+                break;
+            case "MaskTexCoords" when n >= 4:
+                s.MaskTexCoords = new TexRect(EngineArgs.FloatAt(line, 0), EngineArgs.FloatAt(line, 1),
+                    EngineArgs.FloatAt(line, 2), EngineArgs.FloatAt(line, 3));
                 break;
 
             // ---- Model3D ----

@@ -344,8 +344,17 @@ public partial class MainWindow
     /// Move blocks into <paramref name="list"/> at <paramref name="index"/> (counted before they leave
     /// their places), in their order, as one undo step: a drop in the tree.
     /// </summary>
-    internal bool MoveBlocks(IReadOnlyList<HudBlock> blocks, ObservableCollection<HudBlock> list, int index)
+    /// <summary>
+    /// Move blocks to a place in a list. With <paramref name="keepPlace"/> the elements stay where they are drawn
+    /// in their new parent, their positions (and a Scale, for a parent that scales otherwise) written again,
+    /// and one moved to the top of a file takes the viewport it showed in.
+    /// </summary>
+    internal bool MoveBlocks(IReadOnlyList<HudBlock> blocks, ObservableCollection<HudBlock> list, int index, bool keepPlace = true)
     {
+        var options = keepPlace ? KeepPlaceOptions : null;
+        var elements = blocks.Where(IsElement).ToList();
+        var keep = options is not null && elements.Count > 0 ? HudKeepPlace.Capture(HudLayout.Lay(Documents, options), elements) : null;
+        var viewports = elements.ToDictionary(b => b, b => Canvas.LaidOut(b)?.Viewport ?? 0);
         var edits = new List<IHudEdit>();
         foreach (var block in blocks)
         {
@@ -359,11 +368,27 @@ public partial class MainWindow
             index = to + 1;
         }
         if (edits.Count == 0) return false;
-        _undo.Push(edits.Count == 1 ? edits[0] : new CompositeEdit(edits, $"move {edits.Count} blocks"));
+        var moved = edits.Count;
+        _moveNotes.Clear();
+        if (keep is not null)
+        {
+            if (IsTopList(list))
+                foreach (var block in elements.Where(b => viewports[b] > 0 && !b.Children.Any(c => !c.HasBody && c.Name == "Viewport")))
+                {
+                    var add = new InsertBlockEdit(block.Children, 0, new HudBlock("Viewport", HudArgument.FromInt(viewports[block])), "add Viewport", affected: block);
+                    add.Apply();
+                    edits.Add(add);
+                }
+            edits.AddRange(keep.Restore(HudLayout.Lay(Documents, options!), _moveNotes));
+        }
+        _undo.Push(edits.Count == 1 ? edits[0] : new CompositeEdit(edits, $"move {moved} blocks"));
         AfterBlocksChanged(null);
         SelectBlocks(blocks);
         return true;
     }
+
+    // What a move could not keep, said with it.
+    private readonly List<string> _moveNotes = new();
 
     /// <summary>A block in a new place is written at that place's depth.</summary>
     private static void ForgetIndentation(HudBlock block)
@@ -483,8 +508,12 @@ public partial class MainWindow
             StatusText.Text = why;
             return;
         }
-        if (MoveBlocks(blocks, target.List, target.Index))
-            StatusText.Text = $"Moved {Describe(blocks.Cast<object>().ToList())}.";
+        // Alt held as it is dropped keeps the numbers as written, and the place as they make it.
+        var keepPlace = (e.KeyStates & DragDropKeyStates.AltKey) == 0;
+        if (MoveBlocks(blocks, target.List, target.Index, keepPlace))
+            StatusText.Text = $"Moved {Describe(blocks.Cast<object>().ToList())}" +
+                              (keepPlace ? ", where they were drawn." : ", its numbers as written (Alt).") +
+                              (_moveNotes.Count > 0 ? " " + string.Join(" ", _moveNotes) : string.Empty);
     }
 
     private void Tree_DragLeave(object sender, DragEventArgs e)

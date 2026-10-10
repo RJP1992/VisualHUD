@@ -193,7 +193,20 @@ one's for the same key.
 - **Move up** and **Move down** (Alt+Up, Alt+Down) move the selection among its neighbours.
   Dragging rows in the tree moves them before, after or into another row, between files too;
   the marker shows where they will go, and a row that cannot go there is refused with the reason
-  in the status bar. Comments move with their block, re-indented.
+  in the status bar. Comments move with their block, re-indented. An element moved into another
+  group stays where it is drawn: its `Position` is written again for its new parent (with a
+  `Scale` for a parent that scales otherwise), and one moved to the top of a file takes the
+  viewport it showed in. Hold **Alt** as you drop it to keep its numbers as they are instead.
+- **Group** (Ctrl+G, in the Edit menu, and the tree's and the canvas's right-click menus) puts
+  the selected elements in a new Group in the place of the first, its `Rect` fitted to them; at
+  the top of a file GameExt lays out the group stays a plain container, as a group with a
+  `Position` would slide as one piece. **Ungroup** (Ctrl+Shift+G) takes a Group's elements out
+  into its place, its `Position` and `Scale` going into theirs; its other lines go with it, and
+  the status bar names them. **Fit Rect to contents** makes a plain Group's `Rect` the box round
+  what it holds, its `Position` moved so the box's corner is its origin: its frame, the pivot of
+  its alignment (Center makes its `Position` the middle of what it holds) and the outline it is
+  picked and lined up by. A group GameExt slides keeps its edge with a `ScreenAnchor`. Nothing
+  moves on the screen; each is one undo step.
 - Each of these, whatever it touches, is one undo step (Ctrl+Z, Ctrl+Y).
 - The box above the tree filters it: the rows whose name or keyword contains the text, and the
   rows that hold them.

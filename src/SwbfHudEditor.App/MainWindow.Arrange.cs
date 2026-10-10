@@ -21,8 +21,32 @@ public partial class MainWindow
         BuildArrangeMenu(EditArrange.Items);
         BuildArrangeMenu(TreeArrange.Items);
         var canvasMenu = new ContextMenu();
+        BuildStructureMenu(canvasMenu.Items);
+        canvasMenu.Items.Add(new Separator());
         BuildArrangeMenu(canvasMenu.Items);
         Canvas.ContextMenu = canvasMenu;
+        BuildStructureMenu(EditStructure.Items);
+        BuildStructureMenu(TreeStructure.Items);
+    }
+
+    /// <summary>Group, ungroup and fit a group's Rect: nothing moves on the screen.</summary>
+    private static void BuildStructureMenu(ItemCollection items)
+    {
+        items.Add(new MenuItem
+        {
+            Header = "_Group", Command = GroupCommand, InputGestureText = "Ctrl+G",
+            ToolTip = "Put the selected elements in a new Group, its Rect fitted to them; nothing moves.",
+        });
+        items.Add(new MenuItem
+        {
+            Header = "_Ungroup", Command = UngroupCommand, InputGestureText = "Ctrl+Shift+G",
+            ToolTip = "Take the selected Group's elements out into its place, its Position and Scale going into theirs; nothing moves.",
+        });
+        items.Add(new MenuItem
+        {
+            Header = "_Fit Rect to contents", Command = FitRectCommand,
+            ToolTip = "Make the selected Group's Rect the box round what it holds, its Position moved so nothing moves: its frame, the pivot of its alignment and the outline it is picked by.",
+        });
     }
 
     private static void BuildArrangeMenu(ItemCollection items)

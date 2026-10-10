@@ -91,6 +91,7 @@ public partial class MainWindow : Window
         SetUpFind();
         SetUpProblems();
         SetUpArrange();
+        SetUpStructure();
         EventsList.Bind(_events);
         // The events sent always reach the canvas; the Events tab's box decides whether they also show and hide.
         Canvas.SetEventState(_events);

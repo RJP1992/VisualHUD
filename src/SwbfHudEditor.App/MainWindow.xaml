@@ -152,6 +152,8 @@
                     <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
                               ToolTip="Screen pixels: they stay the same size at every resolution." />
                 </MenuItem>
+                <MenuItem x:Name="EditStructure" Header="Gr_oup"
+                          ToolTip="Put elements in a group, take them out of one, fit a group's Rect to what it holds: nothing moves on the screen." />
                 <MenuItem x:Name="EditArrange" Header="_Arrange"
                           ToolTip="Line the selection up as it is drawn on the screen: align, space out, the same size." />
                 <MenuItem Header="Lay out for a screen _shape..." Click="ScreenShape_Click"
@@ -299,6 +301,8 @@
                                         <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
                                                   ToolTip="Screen pixels: they stay the same size at every resolution." />
                                     </MenuItem>
+                                    <MenuItem x:Name="TreeStructure" Header="Gr_oup"
+                                              ToolTip="Put elements in a group, take them out of one, fit a group's Rect to what it holds: nothing moves on the screen." />
                                     <MenuItem x:Name="TreeArrange" Header="_Arrange"
                                               ToolTip="Line the selection up as it is drawn on the screen: align, space out, the same size." />
                                     <Separator />

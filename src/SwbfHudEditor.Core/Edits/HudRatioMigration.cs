@@ -1,6 +1,7 @@
 using System.Numerics;
 using SwbfHudEditor.Core.Hud;
 using SwbfHudEditor.Core.Layout;
+using static SwbfHudEditor.Core.Edits.HudPlacement;
 
 namespace SwbfHudEditor.Core.Edits;
 
@@ -86,7 +87,7 @@ public static class HudRatioMigration
             // Without a Position the element is at its parent's origin, which may not stay where it is (the stock
             // layout's band starts below the top): a line is made for it, added if it is needed. A target is
             // placed by code where the game projects what it marks, and a map by its mode's position.
-            if (Last(e.Block, "Position") is null && e.Kind is not (ElementKind.Target or ElementKind.Map) && !Tracked(e))
+            if (PlacedByOrigin(e))
             {
                 var line = new HudBlock("Position", HudArgument.FromInt(0), HudArgument.FromInt(0), HudArgument.FromInt(0));
                 made[e.Block] = line;
@@ -127,14 +128,14 @@ public static class HudRatioMigration
                     : Vector2.Zero;
                 foreach (var (line, role) in PositionLines(e))
                     if (points.TryGetValue(line, out var point) &&
-                        Place(line, role, e, ((role == Role.Own ? RingPoint(e, rings, sizes, parent) : null) ?? point) + shift, parent) is { } args)
+                        Place(line, role, e, ((role == LineRole.Own ? RingPoint(e, rings, sizes, parent) : null) ?? point) + shift, parent, viewport: true) is { } args)
                     {
                         Apply(new ReplaceArgumentsEdit(line, args, e.Block));
                         lines++;
                     }
                 if (made.TryGetValue(e.Block, out var added) && points.TryGetValue(added, out var at0) &&
-                    Place(added, e.Kind == ElementKind.VehicleSeating ? Role.Seating : Role.Own, e,
-                        (RingPoint(e, rings, sizes, parent) ?? at0) + shift, parent) is { } placed &&
+                    Place(added, e.Kind == ElementKind.VehicleSeating ? LineRole.Seating : LineRole.Own, e,
+                        (RingPoint(e, rings, sizes, parent) ?? at0) + shift, parent, viewport: true) is { } placed &&
                     (MathF.Abs(EngineArgs.Float(placed[0])) > 1e-4f || MathF.Abs(EngineArgs.Float(placed[1])) > 1e-4f))
                 {
                     added.Arguments.Clear();
@@ -173,76 +174,11 @@ public static class HudRatioMigration
     private static IEnumerable<LaidOutElement> Own(HudLayoutResult layout, HudDocument file) =>
         layout.All.Where(e => ReferenceEquals(e.Document, file) && e.Piece is null);
 
-    /// <summary>
-    /// The lines that place an element in its parent: its last <c>Position</c>, a map's positions for each
-    /// mode, and each <c>MeshInfo</c>'s, which replaces a model's matrix.
-    /// </summary>
-    private static IEnumerable<(HudBlock Line, Role Role)> PositionLines(LaidOutElement e)
-    {
-        var block = e.Block;
-        if (Last(block, "Position") is { } own && !Tracked(e))
-            yield return (own, e.Kind == ElementKind.VehicleSeating ? Role.Seating : Role.Own);
-        if (e.Kind == ElementKind.Map)
-            foreach (var name in new[] { "PositionSmall", "PositionLarge", "PositionSpawn" })
-                if (Last(block, name) is { } line) yield return (line, Role.Mode);
-        if (e.Kind == ElementKind.Model3D)
-            foreach (var info in block.Children.Where(c => c.HasBody && c.Name == "MeshInfo"))
-                if (Last(info, "Position") is { } line) yield return (line, Role.MeshInfo);
-    }
-
-    /// <summary>
-    /// A group that follows a position GameExt tracks (a reticule, a command post): in a file it lays out, the
-    /// written Position, the place until the first event, is a share of the real screen whatever the shape.
-    /// </summary>
-    private static bool Tracked(LaidOutElement e) =>
-        e.Block.Children.Any(c => !c.HasBody && c.Name == "EventPosition" && EngineArgs.String(EngineArgs.At(c, 0) ?? HudArgument.FromInt(0)) is { } name &&
-                                  HudLayout.IsTracked(name));
-
-    /// <summary>
-    /// What a position line is: an element's own; a seating chart's own, read as pixels; a map's for one of its
-    /// modes; a MeshInfo's, whose table another model may inherit and convert again.
-    /// </summary>
-    private enum Role { Own, Seating, Mode, MeshInfo }
-
     /// <summary>An element's own size line: a bitmap's <c>BitmapRect</c>, a group's <c>Rect</c>.</summary>
     private static HudBlock? SizeLine(LaidOutElement e) =>
         ElementKinds.IsBitmapBased(e.Kind) ? Last(e.Block, "BitmapRect")
         : ElementKinds.IsGroupBased(e.Kind) ? Last(e.Block, "Rect")
         : null;
-
-    private static HudBlock? Last(HudBlock block, string name) =>
-        block.Children.LastOrDefault(c => !c.HasBody && c.Name == name && c.Arguments.Count >= 2 &&
-                                          EngineArgs.IsNumber(c.Arguments[0]) && EngineArgs.IsNumber(c.Arguments[1]));
-
-    /// <summary>Where a position line puts its element, in its parent's pixels.</summary>
-    private static Vector3 PixelsOf(HudBlock line, Role role, LaidOutElement e)
-    {
-        var x = EngineArgs.FloatAt(line, 0);
-        var y = EngineArgs.FloatAt(line, 1);
-        var z = EngineArgs.FloatAt(line, 2);
-        // VehicleSeating::PostReadSetup reads its own Position as pixels whatever its mode.
-        if (role == Role.Seating) return new Vector3(x, y, z);
-        var mode = EngineArgs.PositionMode(EngineArgs.At(line, 3));
-        return new Vector3(
-            EngineMath.ToPixels(mode, x, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
-            EngineMath.ToPixels(mode, y, e.FrameHeight, e.ViewHeight, e.ScreenHeight), z);
-    }
-
-    /// <summary>The matrix an element's parent hands it, to the screen: its own matrix taken off its draw.</summary>
-    private static Matrix4x4? ParentToScreen(LaidOutElement e)
-    {
-        if (!Matrix4x4.Invert(e.Local, out var inverse)) return null;
-        var parent = inverse * e.ToScreen;
-        return MathF.Abs(Determinant2(parent)) > 1e-9f ? parent : null;
-    }
-
-    private static float Determinant2(Matrix4x4 m) => m.M11 * m.M22 - m.M12 * m.M21;
-
-    private static Vector2 OnScreen(Vector3 pixels, Matrix4x4 parent)
-    {
-        var p = Vector3.Transform(pixels, parent);
-        return new Vector2(p.X, p.Y);
-    }
 
     /// <summary>An element's size as drawn, along its own axes: a bitmap's whole quad, a group's Rect.</summary>
     private static Vector2? DrawnSize(LaidOutElement e)
@@ -277,9 +213,6 @@ public static class HudRatioMigration
         return centre - new Vector2(offset.X * parent.M11 + offset.Y * parent.M21, offset.X * parent.M12 + offset.Y * parent.M22);
     }
 
-    private static (float Across, float Down) Axes(Matrix4x4 m) =>
-        (MathF.Sqrt(m.M11 * m.M11 + m.M12 * m.M12), MathF.Sqrt(m.M21 * m.M21 + m.M22 * m.M22));
-
     /// <summary>
     /// The <c>BitmapRect</c> of each template code draws copies of (a target's markers, a map's icons, a seating
     /// chart's), and of a segmented bar's <c>Segment</c>, with the size a copy is drawn at.
@@ -313,36 +246,6 @@ public static class HudRatioMigration
     }
 
     // ---- Writing --------------------------------------------------------------------------------------------
-
-    /// <summary>
-    /// The arguments that put a position line's element at <paramref name="point"/> on the screen through its
-    /// parent's matrix as it now draws: z kept, in Viewport (Frame, a seating chart's pixels and a MeshInfo's
-    /// own unit kept), or null when nothing moves.
-    /// </summary>
-    private static List<HudArgument>? Place(HudBlock line, Role role, LaidOutElement e, Vector2 point, Matrix4x4 parent)
-    {
-        var z = EngineArgs.FloatAt(line, 2);
-        var bx = point.X - z * parent.M31 - parent.M41;
-        var by = point.Y - z * parent.M32 - parent.M42;
-        var det = Determinant2(parent);
-        var x = (bx * parent.M22 - by * parent.M21) / det;
-        var y = (by * parent.M11 - bx * parent.M12) / det;
-
-        var current = EngineArgs.PositionMode(EngineArgs.At(line, 3));
-        var mode = role == Role.Seating ? RelativeMode.Pixels
-            : role == Role.MeshInfo || current == RelativeMode.Frame ? current
-            : RelativeMode.Viewport;
-        var args = new List<HudArgument>
-        {
-            HudArgument.FromFloat(EngineMath.ToRelative(mode, x, e.FrameWidth, e.ViewWidth, e.ScreenWidth)),
-            HudArgument.FromFloat(EngineMath.ToRelative(mode, y, e.FrameHeight, e.ViewHeight, e.ScreenHeight)),
-            EngineArgs.At(line, 2) ?? HudArgument.FromInt(0),
-        };
-        // A unit left out stays left out where it is the one kept.
-        if (line.Arguments.Count > 3 || mode != current) args.Add(HudArgument.FromString(EngineArgs.RelativeModeNames[(int)mode]));
-        args.AddRange(line.Arguments.Skip(4));
-        return Same(args, line) ? null : args;
-    }
 
     /// <summary>A size line's arguments for <paramref name="drawn"/> screen pixels along these axes, in Viewport.</summary>
     private static List<HudArgument>? Size(HudBlock line, Vector2 drawn, Matrix4x4 toScreen, float viewWidth, float viewHeight)

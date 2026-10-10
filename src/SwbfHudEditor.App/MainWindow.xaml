@@ -152,6 +152,8 @@
                 </MenuItem>
                 <MenuItem x:Name="EditArrange" Header="_Arrange"
                           ToolTip="Line the selection up as it is drawn on the screen: align, space out, the same size." />
+                <MenuItem Header="Lay out for a screen _shape..." Click="ScreenShape_Click"
+                          ToolTip="Rewrite the selected file for GameExt's AuthoredRatio: on a screen of the shape chosen it draws as it does now, and GameExt fits it to other screens." />
                 <Separator />
                 <MenuItem Header="_Find..." Command="{x:Static ApplicationCommands.Find}" InputGestureText="Ctrl+F"
                           ToolTip="Find text in the arguments of the open files: element names, events, textures, text keys." />

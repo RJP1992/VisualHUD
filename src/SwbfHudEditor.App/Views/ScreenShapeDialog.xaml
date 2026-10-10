@@ -1,0 +1,32 @@
+<Window x:Class="SwbfHudEditor.App.Views.ScreenShapeDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Lay out for a screen shape" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="{StaticResource UiFont}" FontSize="{StaticResource UiFontSize}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        SourceInitialized="Window_SourceInitialized">
+    <StackPanel Margin="18,16,18,16">
+        <TextBlock x:Name="IntroText" TextWrapping="Wrap" Margin="0,0,0,14" />
+
+        <TextBlock Text="Screen shape" Style="{StaticResource Caption}" Margin="0,0,0,6" />
+        <WrapPanel x:Name="ShapeList" />
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <RadioButton x:Name="OtherShape" GroupName="Shape" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"
+                         Content="Other:" Checked="Shape_Changed" />
+            <TextBox x:Name="OtherWidth" Text="16" Width="44" Margin="8,0,4,0" HorizontalContentAlignment="Center" TextChanged="Other_Changed" />
+            <TextBlock Text=":" VerticalAlignment="Center" />
+            <TextBox x:Name="OtherHeight" Text="9" Width="44" Margin="4,0,0,0" HorizontalContentAlignment="Center" TextChanged="Other_Changed" />
+        </StackPanel>
+
+        <TextBlock x:Name="ReferenceText" TextWrapping="Wrap" Margin="0,14,0,0" />
+        <TextBlock Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Text="Positions, and the sizes of bitmaps and groups, are written in Viewport so they follow the resolution; Frame positions stay in Frame. Text and models keep their own shape, which the stock layout squashed. Groups that follow a position GameExt tracks, such as the reticule, keep theirs. One undo step." />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="RewriteButton" Content="Rewrite" Style="{StaticResource AccentButton}" IsDefault="True" MinWidth="84" Click="Rewrite_Click" />
+            <Button Content="Cancel" IsCancel="True" MinWidth="84" Margin="8,0,0,0" />
+        </StackPanel>
+    </StackPanel>
+</Window>

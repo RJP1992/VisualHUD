@@ -443,6 +443,9 @@ public partial class HudCanvas : UserControl
     public (int Width, int Height)? TextureSizeOf(string name) =>
         _textures?.Get(name) is { } t ? (t.PixelWidth, t.PixelHeight) : null;
 
+    /// <summary>The options the canvas last laid out with: its fonts and textures, its target.</summary>
+    internal LayoutOptions? LayoutOptions => _layout?.Options;
+
     /// <summary>The resolution the canvas draws at.</summary>
     public HudScreen ScreenSize => _screen;
 

@@ -47,6 +47,15 @@ by its own `FileInfo`. The editor works on such a set:
 - Under GameExt, a file with `AuthoredRatio` or `TrueWidescreen` is laid out on its ratio
   while the files without one keep the stock layout, side by side. The tree notes the files
   GameExt lays out; the guides and the layout line are for the selection's file.
+- **Edit > Lay out for a screen shape** rewrites the selection's file for `AuthoredRatio(w, h)`
+  at a shape you pick (4:3, 5:4, 16:10, 16:9, the two 21:9s, 32:9 or your own) so that on a
+  screen of that shape, at the canvas's height, it draws as it does now, whatever laid it out
+  before: the stock layout, `TrueWidescreen` or another ratio. Each position becomes where it
+  puts its element, and each bitmap's and group's size its size as drawn, through its parents
+  as they become, in Viewport (Frame positions stay Frame); a ring of segments keeps its
+  middle and its radii, and an element with no `Position` that would move gets one. Text and
+  models keep their own shape, which the stock layout squashed, and groups that follow a
+  position GameExt tracks, such as the reticule, keep theirs. One undo step.
 - Events and transforms reach every file. Each file's checkbox shows or hides its elements.
 - **Save** writes every file with unsaved changes, and only those; **Save file as** writes
   the selection's file under a new name. A saved file keeps its comments, blank lines,

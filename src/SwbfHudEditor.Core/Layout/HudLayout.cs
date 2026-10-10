@@ -39,6 +39,7 @@ public static class HudLayout
     {
         var byBlock = new Dictionary<HudBlock, LaidOutElement>(ReferenceEqualityComparer.Instance);
         var sharedPositions = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+        var meshInfoUsers = new Dictionary<List<MeshInfoSpec>, List<LaidOutElement>>(ReferenceEqualityComparer.Instance);
         var files = new List<(HudDocument Document, HudFileLayout Layout)>();
         var roots = new List<LaidOutElement>();
         var round = options.RoundsToUnits;
@@ -49,7 +50,7 @@ public static class HudLayout
         {
             var file = HudFileLayout.For(doc, options);
             files.Add((doc, file));
-            var ctx = new Context(options, file, doc, byBlock, sharedPositions);
+            var ctx = new Context(options, file, doc, byBlock, sharedPositions, meshInfoUsers);
 
             var docRoots = new List<LaidOutElement>();
             foreach (var top in TopLevelElements(doc))
@@ -67,6 +68,8 @@ public static class HudLayout
             roots.AddRange(docRoots);
         }
 
+        RedrawSharedMeshInfos(options, meshInfoUsers);
+
         var next = 0;
         foreach (var e in DrawOrder(TopLevelInsertionOrder(roots, options.ShowByEvents ? options.Simulation : null), topLevel: true))
             e.DrawIndex = next++;
@@ -82,9 +85,13 @@ public static class HudLayout
     }
 
     private sealed class Context(LayoutOptions options, HudFileLayout file, HudDocument document,
-        Dictionary<HudBlock, LaidOutElement> byBlock, Dictionary<string, Vector3> sharedPositions)
+        Dictionary<HudBlock, LaidOutElement> byBlock, Dictionary<string, Vector3> sharedPositions,
+        Dictionary<List<MeshInfoSpec>, List<LaidOutElement>> meshInfoUsers)
     {
         public LayoutOptions Options { get; } = options;
+
+        /// <summary>Each MeshInfo table, and the models that read it as they loaded, in load order.</summary>
+        public Dictionary<List<MeshInfoSpec>, List<LaidOutElement>> MeshInfoUsers { get; } = meshInfoUsers;
 
         /// <summary>The events decide what shows, as in the game.</summary>
         public bool ShowsByEvents => Options.Simulation is not null && Options.ShowByEvents;
@@ -213,23 +220,7 @@ public static class HudLayout
                 e.Local = ApplyMove(e, e.Local, move, move.Value);
             }
 
-        if (kind == ElementKind.Model3D)
-        {
-            e.Mesh = runtime?.Mesh ?? ctx.Options.ModelMesh?.Invoke(spec) ?? spec.Mesh ?? spec.MeshInfos.FirstOrDefault()?.Mesh;
-            var info = e.Mesh is null ? null
-                : spec.MeshInfos.FirstOrDefault(m => string.Equals(m.Mesh, e.Mesh, StringComparison.OrdinalIgnoreCase));
-            if (info is not null)
-            {
-                // ElementModel3D::PostReadSetup converts each MeshInfo with the element's sizes, and
-                // SetMesh hands the drawable that matrix in place of the element's.
-                e.MeshInfo = info;
-                e.Local = EngineMath.LocalMatrix(EngineMath.Rotation(info.Rotation.X, info.Rotation.Y, info.Rotation.Z), info.Scale,
-                    new Vector3(
-                        EngineMath.ToPixels(info.PositionMode, info.Position.X, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
-                        EngineMath.ToPixels(info.PositionMode, info.Position.Y, e.FrameHeight, e.ViewHeight, e.ScreenHeight),
-                        info.Position.Z));
-            }
-        }
+        if (kind == ElementKind.Model3D) PlaceModel(ctx, e, spec, runtime);
 
         // EventColor replaces the colour (its alpha is dropped); a group's EventAlpha replaces its alpha.
         var c = runtime?.Color is { } rc ? new Vector3(rc.R, rc.G, rc.B) / 255f
@@ -243,6 +234,83 @@ public static class HudLayout
 
         if (kind == ElementKind.BarSegmented) LayOutSegments(ctx, e);
         return e;
+    }
+
+    /// <summary>
+    /// A model's mesh, matrix and depth. <c>ElementModel3D::SetMesh</c> (P <c>006063A0</c>) runs on the
+    /// <c>Mesh</c> line, before the MeshInfo table is read, and on each mesh an event sends. Then a
+    /// MeshInfo for that mesh replaces the element's matrix and depth; without one the element keeps its
+    /// own matrix, but its depth goes back to 0.01. A <c>Depth</c> line lasts only until then.
+    /// </summary>
+    private static void PlaceModel(Context ctx, LaidOutElement e, ElementSpec spec, Events.ElementRuntime? runtime)
+    {
+        var table = MeshInfoTable(ctx, spec);
+        if (!ctx.MeshInfoUsers.TryGetValue(table, out var users)) ctx.MeshInfoUsers[table] = users = new List<LaidOutElement>();
+        users.Add(e);
+
+        var sent = runtime?.Mesh;
+        if (sent is null && spec.Mesh is null)
+            sent = ctx.Options.ModelMesh?.Invoke(spec) ?? table.FirstOrDefault()?.Mesh;   // what its event would send
+        e.Mesh = sent ?? spec.Mesh;
+        e.MeshDepth = spec.Depth ?? ModelProjection.DefaultDepth;
+        if (sent is null) return;
+
+        var info = table.FirstOrDefault(m => string.Equals(m.Mesh, sent, StringComparison.OrdinalIgnoreCase));
+        e.MeshDepth = info?.Depth ?? ModelProjection.DefaultDepth;
+        if (info is null) return;
+        e.MeshInfo = info;
+        e.Local = MeshInfoMatrix(info, users);
+    }
+
+    /// <summary>
+    /// The MeshInfo table a model reads: its own, else the one <c>InheritMeshInfo</c> (P <c>00606150</c>)
+    /// shares from a Model3D made before it, found by name. Its own blocks win, as the read assigns them
+    /// after the line.
+    /// </summary>
+    private static List<MeshInfoSpec> MeshInfoTable(Context ctx, ElementSpec spec, int hops = 0)
+    {
+        if (spec.MeshInfos.Count > 0 || spec.InheritMeshInfo is not { } name || hops > 16) return spec.MeshInfos;
+        foreach (var other in ctx.ByBlock.Values)
+            if (other.Kind == ElementKind.Model3D && other.Spec != spec &&
+                string.Equals(other.Spec.Name, name, StringComparison.OrdinalIgnoreCase))
+                return MeshInfoTable(ctx, other.Spec, hops + 1) is { Count: > 0 } shared ? shared : spec.MeshInfos;
+        return spec.MeshInfos;
+    }
+
+    /// <summary>
+    /// A MeshInfo's matrix. Each model that reads the table converts its positions in place, with its own
+    /// sizes, as it loads (<c>ElementModel3D::PostReadSetup</c>, P <c>00605BA0</c>;
+    /// <c>Matrix::ApplyRelativeMode</c>, P <c>005F2AC0</c>): a table shared by <c>InheritMeshInfo</c> is
+    /// converted once per model, which only <c>"Pixels"</c> positions come through unchanged.
+    /// </summary>
+    private static Matrix4x4 MeshInfoMatrix(MeshInfoSpec info, IReadOnlyList<LaidOutElement> users)
+    {
+        var x = info.Position.X;
+        var y = info.Position.Y;
+        foreach (var u in users)
+        {
+            x = EngineMath.ToPixels(info.PositionMode, x, u.FrameWidth, u.ViewWidth, u.ScreenWidth);
+            y = EngineMath.ToPixels(info.PositionMode, y, u.FrameHeight, u.ViewHeight, u.ScreenHeight);
+        }
+        return EngineMath.LocalMatrix(EngineMath.Rotation(info.Rotation.X, info.Rotation.Y, info.Rotation.Z), info.Scale,
+            new Vector3(x, y, info.Position.Z));
+    }
+
+    /// <summary>Once every file has loaded: the models showing a MeshInfo of a table that later models shared.</summary>
+    private static void RedrawSharedMeshInfos(LayoutOptions options, Dictionary<List<MeshInfoSpec>, List<LaidOutElement>> tables)
+    {
+        var toScreen = EngineMath.UnitsToScreen(options.Screen);
+        foreach (var (table, users) in tables)
+        {
+            if (users.Count < 2) continue;
+            foreach (var e in users)
+            {
+                if (e.MeshInfo is not { } info || !table.Contains(info)) continue;
+                e.Local = MeshInfoMatrix(info, users);
+                e.World = options.RoundsToUnits ? EngineMath.RoundTranslation(e.Local * e.ParentWorld) : e.Local * e.ParentWorld;
+                e.ToScreen = e.World * toScreen;
+            }
+        }
     }
 
     /// <summary>

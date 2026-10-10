@@ -140,6 +140,51 @@ Then:
 - **Runtime HUD scale.** `HUD::Element::SetRuntimeScale` (P `005F5400`) rescales the axes
   of `Scalable(1)` elements and keeps their translation.
 
+## Models
+
+`SwbfHudEditor.Core/Layout/ModelProjection.cs` ports how a `Model3D` is drawn, and
+`SwbfHudEditor.App/Views/MeshRenderer.cs` draws the mesh with it.
+
+- **The camera.** The HUD's models go through the same camera as the rest of the HUD: it
+  looks down -z with a horizontal field of 60° (`t = 2 tan 30° = 1.1547`), near plane 1.0,
+  far 10000, and the same focal length `W / t` on both axes (`RedInterfaceScreen::Render`,
+  M `00817870`; `internalUpdateSceneConstants`, M `0080ACB0`). It is a true perspective.
+- **LocalToWorld.** `Red3DModelElementLite::RenderUsingContext` (M `00839F80`) takes the
+  element's world matrix, then `LocalToWorld` (M `00839D80`) turns its up row over and
+  multiplies only the translation by `Depth × 640 / W` (`GetDepthMultiplier`, M `00839D60`,
+  while the HUD draws). That pulls the model from the HUD's plane toward the camera.
+- **Size.** In x the two `640 / W` factors cancel: one mesh unit is `W / (640 × Depth)` HUD
+  pixels in the element's own frame (300 at 1920 wide with the default depth 0.01), with the
+  mesh's y up. In y the mesh gets the same vertical mapping as everything else: the 8/9 band
+  at 16:9 on the stock layout, square under `AuthoredRatio`. The element's and its groups'
+  `Scale` and `Rotation` apply as to any child. Mesh units are used raw, with no fitting.
+- **Perspective.** The mesh's z is never scaled by `640 / W`, so a vertex `dz` nearer the
+  camera is drawn `Z0 / (Z0 - dz)` times as far from the screen's middle, where
+  `Z0 = Depth × 640/W × (640/t - z)`: 1.85 at 1920 wide. Anything nearer than the near plane
+  is cut off. The higher the resolution, the stronger the perspective.
+- **Nodes.** Each segment is drawn through its node's default pose (`RedModel::Render`,
+  P `008993D0`): the `.msh` `TRAN` of its `MODL`, chained up the parents. Hidden nodes and
+  shadow volumes are left out.
+- **Mesh and MeshInfo.** `ElementModel3D::SetMesh` (P `006063A0`) runs on the `Mesh` line
+  and on each mesh an event sends. It looks the mesh up in the MeshInfo table: a `MeshInfo`
+  for it replaces the element's whole matrix and its depth (0.01 unless it has a `Depth`);
+  without one the element's own matrix is put back with depth 0.01. The table is read after
+  the element's other lines (`ElementModel3D::Read`, P `00605C70`), so the mesh of a `Mesh`
+  line keeps the element's own matrix, and a `MeshInfo` only places a mesh an event sends.
+  An element's `Depth` line writes the drawable directly and lasts until the mesh changes.
+  If the model is already loaded when the `Mesh` line is read, `SetMesh` also resets the
+  `Position`, `Rotation` and `Depth` lines written before it; the stock files write `Mesh`
+  first. The editor does not model that reset, because it depends on what is loaded first.
+- **InheritMeshInfo.** `InheritMeshInfo("name")` shares the table of a Model3D made before it
+  (P `00606150`). Each model that reads a table converts its positions in place as it
+  loads (`ElementModel3D::PostReadSetup`, P `00605BA0`; `Matrix::ApplyRelativeMode`,
+  P `005F2AC0`). A shared table is therefore converted once per model that reads it: a
+  `"Viewport"` position is multiplied by the view's size twice with one heir. Only
+  `"Pixels"` positions come through as written. The editor draws it the same way.
+- **Hardpoint** (`F × bone` before `LocalToWorld`) and the model's lighting are not
+  modelled: models are drawn unlit, textured and coloured by their vertices, nearer
+  surfaces over farther ones.
+
 ## Text
 
 `SwbfHudEditor.Core/Layout/TextLayout.cs` ports the game's text layout; the font comes from its
@@ -280,10 +325,6 @@ BorderedBox and MultilineText with all they hold.
 
 ## Not modelled yet
 
-- **Model sizes.** A model's translation is scaled by its `Depth` (0.01 by default) and a
-  perspective factor (`Red3DModelElementLite::LocalToWorld`, P `008DECE0`;
-  `GetDepthMultiplier`, P `008DEC60`), which brings it near the camera. The preview still
-  sizes a mesh unit as 1/7 of the width, an estimate.
 - **Map, Target, MultilineText, ObjectiveList, VehicleSeating, BorderedBox** draw from
   code the preview does not run; they show as outlines of their Rect.
 - **Time.** The simulation has no clock: fades (`FadeInTime`, `FadeHoldTime` and the rest) are
@@ -293,6 +334,7 @@ BorderedBox and MultilineText with all they hold.
   MultilineText elements draw from the game's state.
 - **ReticleCorrection.** GameExt shifts `player1.weaponN.reticule.position`'s y for stock files
   on a wide screen; the editor sends the value as typed.
-- **Perspective.** Depth is dropped: an element tilted out of the screen plane by
-  `Rotation` x or y is drawn foreshortened but without perspective.
+- **Perspective for flat elements.** Depth is dropped for bitmaps and text: one tilted out
+  of the screen plane by `Rotation` x or y is drawn foreshortened but without perspective.
+  Models are drawn in perspective (see [Models](#models)).
 - **ProceduralBarBitmap**'s flicker and its 1.3× size.

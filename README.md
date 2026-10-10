@@ -105,7 +105,10 @@ one's for the same key.
 - **Hidden** draws faintly what the game's showing and hiding keeps hidden (see
   [Events](#events)).
 - The ⚙ button holds **HUD scale**, which resizes `Scalable(1)` elements as the game's video
-  option does, and **Model size**, which tunes the size of `Model3D` meshes.
+  option does.
+- Models are drawn as the game draws them, through its camera: one mesh unit is
+  `W / (640 × Depth)` pixels across (300 at 1920 wide), a nearer part is larger, and a
+  `MeshInfo` places only a mesh its event sends. See [docs/Engine.md](docs/Engine.md#models).
 - **Reference** shows an image loaded with **File > Load reference image** (PNG, JPEG, BMP
   or TGA), such as a screenshot or a mock-up, stretched across the screen under the HUD, or
   **On top** of it, at the slider's opacity. It is remembered between sessions and never

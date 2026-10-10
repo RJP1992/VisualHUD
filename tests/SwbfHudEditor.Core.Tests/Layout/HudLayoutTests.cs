@@ -413,7 +413,7 @@ public class HudLayoutTests
     }
 
     [Fact]
-    public void A_Models_MeshInfo_Replaces_Its_Matrix()
+    public void A_Models_MeshInfo_Replaces_Its_Matrix_For_A_Mesh_Its_Event_Sends()
     {
         const string source = """
             Group("g")
@@ -423,25 +423,36 @@ public class HudLayoutTests
                 {
                     Position(10, 10, 0)
                     Scale(2, 2, 2)
-                    Mesh("gun")
+                    EventMesh("player1.weapon1.mesh")
                     MeshInfo("gun") { Position(0.5, 0.25, 0, "Viewport") }
                     MeshInfo("other") { Position(1, 1, 0) }
                 }
             }
             """;
         var doc = HudParser.Parse(source);
-        var m = HudLayout.Lay(doc, new LayoutOptions { Screen = Hd }).All.Single(e => e.Spec.Name == "m");
+        LaidOutElement Showing(string? mesh) =>
+            HudLayout.Lay(doc, new LayoutOptions { Screen = Hd, ModelMesh = _ => mesh }).All.Single(e => e.Spec.Name == "m");
+
+        // Before its event, the first MeshInfo's mesh stands for what it would send.
+        var m = Showing(null);
         Assert.Equal("gun", m.Mesh);
         Assert.True(Near(m.Local.M41, 640) && Near(m.Local.M42, 180) && Near(m.Local.M11, 1));
         Assert.True(Near(m.LoadLocal.M41, 10) && Near(m.LoadLocal.M11, 2));
         Assert.Same(m.MeshInfo!.Block, m.PositionOwner);
 
-        var other = HudLayout.Lay(doc, new LayoutOptions { Screen = Hd, ModelMesh = _ => "OTHER" }).All.Single(e => e.Spec.Name == "m");
+        var other = Showing("OTHER");
         Assert.True(Near(other.Local.M41, 1) && Near(other.Local.M42, 1));
 
-        var none = HudLayout.Lay(doc, new LayoutOptions { Screen = Hd, ModelMesh = _ => "missing" }).All.Single(e => e.Spec.Name == "m");
+        var none = Showing("missing");
         Assert.Null(none.MeshInfo);
         Assert.True(Near(none.Local.M41, 10) && Near(none.Local.M11, 2));
+
+        // A Mesh line runs SetMesh before the table is read: its mesh keeps the element's own matrix.
+        var line = HudLayout.Lay(HudParser.Parse(source.Replace("EventMesh(\"player1.weapon1.mesh\")", "Mesh(\"gun\")")),
+            new LayoutOptions { Screen = Hd }).All.Single(e => e.Spec.Name == "m");
+        Assert.Equal("gun", line.Mesh);
+        Assert.Null(line.MeshInfo);
+        Assert.True(Near(line.Local.M41, 10) && Near(line.Local.M11, 2));
     }
 
     [Fact]

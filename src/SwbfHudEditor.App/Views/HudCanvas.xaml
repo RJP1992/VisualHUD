@@ -80,7 +80,7 @@
                               ToolTip="Draw the reference image over the HUD instead of under it, to compare edges." />
 
                     <!-- Rarely changed: in a popup. A click on the button while it is open only closes it. -->
-                    <ToggleButton x:Name="MoreButton" ToolTip="HUD scale and model size" Margin="0,2,0,2"
+                    <ToggleButton x:Name="MoreButton" ToolTip="HUD scale" Margin="0,2,0,2"
                                   IsHitTestVisible="{Binding IsOpen, ElementName=MorePopup, Converter={StaticResource NotBool}}">
                         <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="13" />
                     </ToggleButton>
@@ -98,16 +98,7 @@
                                         ValueChanged="Slider_Changed" Margin="0,4,0,0"
                                         ToolTip="The runtime HUD scale (ScriptCB_SetHUDScale, set by the video options). It resizes only elements with Scalable(1), keeping their positions." />
                                 <TextBlock Text="Resizes the elements with Scalable(1), as the game's video option does." Foreground="{StaticResource TextMutedBrush}"
-                                           FontSize="11" TextWrapping="Wrap" Margin="0,2,0,10" />
-                                <DockPanel>
-                                    <TextBlock x:Name="MeshFactorLabel" DockPanel.Dock="Right" Text="1.00" Foreground="{StaticResource TextBrush}" />
-                                    <TextBlock Text="Model size" Style="{StaticResource Label}" />
-                                </DockPanel>
-                                <Slider x:Name="MeshFactorSlider" Minimum="0.1" Maximum="5.0" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="False"
-                                        ValueChanged="Slider_Changed" Margin="0,4,0,0"
-                                        ToolTip="A factor on the size Model3D meshes are drawn at." />
-                                <TextBlock x:Name="MeshFactorNote" Text="Model3D sizes are estimated: tune this until models match their bitmaps."
-                                           Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" />
                             </StackPanel>
                         </Border>
                     </Popup>

@@ -193,6 +193,12 @@ public sealed class LaidOutElement
     public string? Mesh { get; set; }
     public MeshInfoSpec? MeshInfo { get; set; }
 
+    /// <summary>
+    /// A model's depth as drawn (<c>m_fDepth</c>): how far <c>LocalToWorld</c> pulls it toward the camera,
+    /// which sets its size. See <see cref="ModelProjection"/>.
+    /// </summary>
+    public float MeshDepth { get; set; } = ModelProjection.DefaultDepth;
+
     /// <summary>The matrix its draw was handed: its parent's world, or its screen group's.</summary>
     public Matrix4x4 ParentWorld { get; set; }
 

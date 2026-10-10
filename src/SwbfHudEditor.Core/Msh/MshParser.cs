@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 
 namespace SwbfHudEditor.Core.Msh;
@@ -33,8 +34,53 @@ public static class MshParser
         using var reader = new BinaryReader(stream);
         var state = new ParseState();
         Parse(reader, stream.Length, state);
-        return new MshGeometry(state.Materials, state.Segments, state.BoundingBox);
+        return new MshGeometry(state.Materials, PlaceSegments(state), state.BoundingBox);
     }
+
+    /// <summary>
+    /// Each segment in the model's own space: the game draws a segment through its node's default pose
+    /// (<c>RedModel::Render</c>, P <c>008993D0</c>), the node's <c>TRAN</c> chained up its parents. Hidden
+    /// nodes and shadow volumes are not drawn.
+    /// </summary>
+    private static List<MshSegment> PlaceSegments(ParseState state)
+    {
+        var byName = new Dictionary<string, Node>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in state.Nodes) byName.TryAdd(n.Name, n);
+        var placed = new List<MshSegment>(state.Segments.Count);
+        foreach (var (segment, node) in state.Segments)
+        {
+            if (node is not null && ((node.Flags & 1) != 0 || node.Type == ShadowVolume)) continue;
+            var world = node is null ? Matrix4x4.Identity : WorldOf(node, byName);
+            if (world.IsIdentity)
+            {
+                placed.Add(segment);
+                continue;
+            }
+            var positions = new List<Vec3>(segment.Positions.Count);
+            foreach (var p in segment.Positions)
+            {
+                var v = Vector3.Transform(new Vector3(p.X, p.Y, p.Z), world);
+                positions.Add(new Vec3(v.X, v.Y, v.Z));
+            }
+            placed.Add(segment with { Positions = positions });
+        }
+        return placed;
+    }
+
+    private static Matrix4x4 WorldOf(Node node, Dictionary<string, Node> byName)
+    {
+        var world = node.Local;
+        var parent = node.Parent;
+        for (var hops = 0; hops < 64 && parent.Length > 0 && byName.TryGetValue(parent, out var p) && !ReferenceEquals(p, node); hops++)
+        {
+            world *= p.Local;
+            parent = p.Parent;
+        }
+        return world;
+    }
+
+    /// <summary><c>MTYP</c> of a shadow volume.</summary>
+    private const int ShadowVolume = 6;
 
     // ── Texture-only scan ─────────────────────────────────────────────────────────
 
@@ -66,10 +112,22 @@ public static class MshParser
 
     // ── Full geometry parse ───────────────────────────────────────────────────────
 
+    /// <summary>A <c>MODL</c> node: its name, parent, type, flags and transform.</summary>
+    private sealed class Node
+    {
+        public string Name = "";
+        public string Parent = "";
+        public int Type = -1;
+        public uint Flags;
+        public Matrix4x4 Local = Matrix4x4.Identity;
+    }
+
     private sealed class ParseState
     {
         public List<string> Materials { get; } = new();
-        public List<MshSegment> Segments { get; } = new();
+        public List<(MshSegment Segment, Node? Node)> Segments { get; } = new();
+        public List<Node> Nodes { get; } = new();
+        public Node? CurrentNode;
         public MshBoundingBox? BoundingBox { get; set; }
         public int CurrentSegmentMatIndex;
         public List<Vec3>? CurrentPositions;
@@ -93,6 +151,43 @@ public static class MshParser
                 case "TX0D":
                     state.Materials.Add(ReadAsciiZ(reader, (int)size));
                     break;
+
+                case "MODL":
+                {
+                    var outer = state.CurrentNode;
+                    state.CurrentNode = new Node();
+                    state.Nodes.Add(state.CurrentNode);
+                    Parse(reader, payloadEnd, state);
+                    state.CurrentNode = outer;
+                    break;
+                }
+
+                case "NAME" when state.CurrentNode is not null:
+                    state.CurrentNode.Name = ReadAsciiZ(reader, (int)size);
+                    break;
+
+                case "PRNT" when state.CurrentNode is not null:
+                    state.CurrentNode.Parent = ReadAsciiZ(reader, (int)size);
+                    break;
+
+                case "MTYP" when state.CurrentNode is not null && size >= 4:
+                    state.CurrentNode.Type = reader.ReadInt32();
+                    break;
+
+                case "FLGS" when state.CurrentNode is not null && size >= 4:
+                    state.CurrentNode.Flags = reader.ReadUInt32();
+                    break;
+
+                case "TRAN" when state.CurrentNode is not null && size >= 40:
+                {
+                    // Scale, rotation as a quaternion (x, y, z, w), translation.
+                    var scale = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                    var rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                    var translation = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                    state.CurrentNode.Local = Matrix4x4.CreateScale(scale) * Matrix4x4.CreateFromQuaternion(rotation) *
+                                              Matrix4x4.CreateTranslation(translation);
+                    break;
+                }
 
                 case "BBOX":
                     // SINF's BBOX appears first (overall mesh bounds across all MODLs).
@@ -143,12 +238,12 @@ public static class MshParser
                     Parse(reader, payloadEnd, state);
                     if (state.CurrentPositions is { Count: > 0 } && state.CurrentTriangles is { Count: > 0 })
                     {
-                        state.Segments.Add(new MshSegment(
+                        state.Segments.Add((new MshSegment(
                             state.CurrentSegmentMatIndex,
                             state.CurrentPositions,
                             state.CurrentUvs ?? (IReadOnlyList<Vec2>)Array.Empty<Vec2>(),
                             state.CurrentTriangles,
-                            state.CurrentColors ?? (IReadOnlyList<RgbaColor>)Array.Empty<RgbaColor>()));
+                            state.CurrentColors ?? (IReadOnlyList<RgbaColor>)Array.Empty<RgbaColor>()), state.CurrentNode));
                     }
                     break;
 

@@ -205,13 +205,13 @@ public static class PropertyCatalog
             () => Leaf("EventMesh", S("player1.weapon1.mesh")));
         Add("Model3D", "Model", "Lighting", "0: the model is drawn unlit; lit by default.",
             () => Leaf("Lighting", I(0)));
-        Add("Model3D", "Model", "Depth", "Scales the model's translation toward the camera; 0.01 by default.",
+        Add("Model3D", "Model", "Depth", "Sets the model's size: a mesh unit is W / (640 x Depth) pixels across, 0.01 by default. It lasts until an event changes the mesh, which puts it back to 0.01 or to its MeshInfo's Depth.",
             () => Leaf("Depth", F(0.01)));
         Add("Model3D", "Model", "Hardpoint", "Draws the model through this bone's matrix.",
             () => Leaf("Hardpoint", S("hp_bone")));
-        Add("Model3D", "Model", "InheritMeshInfo", "Shares an earlier Model3D's MeshInfo table, by that element's name.",
+        Add("Model3D", "Model", "InheritMeshInfo", "Shares an earlier Model3D's MeshInfo table, by that element's name. Each model that reads the table converts its positions again, so write them in Pixels.",
             () => Leaf("InheritMeshInfo", S("player1weapon1model")));
-        Add("Model3D", "Model", "MeshInfo", "A model's own placement: while that model is shown, this block's position, rotation and scale replace the element's.",
+        Add("Model3D", "Model", "MeshInfo", "A model's own placement: when an event sends that model, this block's position, rotation, scale and depth replace the element's. A Mesh line's model keeps the element's own.",
             () => Block("MeshInfo", "hud_model", Leaf("Position", F(0), F(0), F(0), S("Viewport"))),
             isBlock: true, repeatable: true);
         Add("MeshInfo", "Placement", "Position", "(x, y, z, mode): the model's position while it is shown.",
@@ -220,7 +220,7 @@ public static class PropertyCatalog
             () => Leaf("Rotation", F(0), F(0), F(0)));
         Add("MeshInfo", "Placement", "Scale", "(x, y, z).",
             () => Leaf("Scale", F(1), F(1), F(1)));
-        Add("MeshInfo", "Model", "Depth", "Replaces the element's Depth while this model is shown.",
+        Add("MeshInfo", "Model", "Depth", "The depth, which sets the size, when an event sends this model; 0.01 without it.",
             () => Leaf("Depth", F(0.01)));
 
         // ---- Lists and boxes ----

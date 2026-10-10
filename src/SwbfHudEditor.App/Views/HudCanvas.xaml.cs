@@ -104,7 +104,6 @@ public partial class HudCanvas : UserControl
         _textures = assets is not null ? new TextureCache(assets) : null;
         _fonts = new TextFonts(assets);
         _meshRenderer = _textures is not null && assets is not null ? new MeshRenderer(assets, _textures) : null;
-        if (_meshRenderer is not null) _meshRenderer.MeshUnitToHudPixels = MeshFactorSlider.Value;
         _localization = localization;
         _tinted.Clear();
         Render();
@@ -262,7 +261,8 @@ public partial class HudCanvas : UserControl
             var state = !e.InActiveViewport ? "other viewport" : e.Shown ? "shown" : e.Enabled ? "parent hidden" : "hidden";
             var what = new List<string>();
             if (e.Quad is { } q) what.Add($"quad {q.Width:0}x{q.Height:0}" + (e.Texture is { } t ? $" {t}" : " (no texture)"));
-            if (e.Kind == ElementKind.Model3D) what.Add($"mesh {e.Mesh ?? "(none)"}{(e.Mesh is { } m && _meshRenderer?.Get(m) is null ? " (not found)" : "")}");
+            if (e.Kind == ElementKind.Model3D)
+                what.Add($"mesh {e.Mesh ?? "(none)"}{(e.Mesh is { } m && _meshRenderer?.Geometry(m) is null ? " (not found)" : "")} depth {e.MeshDepth:0.####}");
             if (e.Kind == ElementKind.Text) what.Add($"text \"{ShownText(e)}\"");
             if (ElementKinds.IsBar(e.Kind)) what.Add($"bar {e.BarFraction:0.##}");
             if (e.Role != PieceRole.None) what.Add($"{e.Role} slid {e.Slide:0.#}");
@@ -540,26 +540,20 @@ public partial class HudCanvas : UserControl
 
     private FrameworkElement? ModelVisual(LaidOutElement e)
     {
-        var result = e.Mesh is { } mesh ? _meshRenderer?.Get(mesh) : null;
-        if (result is null)
+        if (e.Mesh is not { } mesh || _meshRenderer?.Geometry(mesh) is null)
             return ShowPlaceholders ? MarkerVisual(e.ToScreen, LabelFor(e) + (e.Mesh is null ? "  (no mesh)" : $"  ({e.Mesh} not found)")) : null;
 
-        // Estimated: a mesh unit drawn as 1/7 of the screen's width (see MeshRenderer).
-        var unit = _screen.Width / 7.0 * (_meshRenderer?.MeshUnitToHudPixels ?? 1.0);
-        var w = result.WidthUnits * unit;
-        var h = result.HeightUnits * unit;
-        if (w <= 0 || h <= 0) return null;
-        var image = new Rectangle
+        // As the game draws it: its world matrix pulled toward the camera by its depth, in perspective.
+        var drawing = _meshRenderer.Draw(mesh, ModelProjection.MeshToView(e.World, e.MeshDepth, _screen), _screen);
+        if (drawing is null) return null;
+        return new Rectangle
         {
-            Width = w,
-            Height = h,
-            Fill = new ImageBrush(Tinted(result.Image, e.DrawColor, false)) { Stretch = Stretch.Fill },
+            Width = drawing.Image.PixelWidth,
+            Height = drawing.Image.PixelHeight,
+            Fill = new ImageBrush(Tinted(drawing.Image, e.DrawColor, false)) { Stretch = Stretch.Fill },
             Opacity = Math.Clamp(e.DrawAlpha, 0.0, 1.0),
+            RenderTransform = new TranslateTransform(drawing.Left, drawing.Top),
         };
-        // The mesh's origin sits at the element's position.
-        var local = Matrix4x4.CreateTranslation((float)(-result.OriginFracX * w), (float)(-result.OriginFracY * h), 0f);
-        image.RenderTransform = new MatrixTransform(ToWpf(local * e.ToScreen));
-        return image;
     }
 
     private FrameworkElement? SegmentsVisual(LaidOutElement bar)
@@ -1154,8 +1148,6 @@ public partial class HudCanvas : UserControl
     {
         if (!_ready) return;
         HudScaleLabel.Text = HudScaleSlider.Value.ToString("0.00", CultureInfo.InvariantCulture);
-        MeshFactorLabel.Text = MeshFactorSlider.Value.ToString("0.00", CultureInfo.InvariantCulture);
-        if (_meshRenderer is not null) _meshRenderer.MeshUnitToHudPixels = MeshFactorSlider.Value;
         Render();
     }
 

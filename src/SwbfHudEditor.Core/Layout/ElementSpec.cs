@@ -221,10 +221,19 @@ public sealed class ElementSpec
     public string? EventMesh { get; set; }
 
     /// <summary>
-    /// <c>MeshInfo("mesh") { ... }</c>: when that mesh is the element's model,
-    /// <c>ElementModel3D::SetMesh</c> (P <c>006063A0</c>) replaces the element's whole matrix with this one.
+    /// <c>MeshInfo("mesh") { ... }</c>: when an event sends that mesh, <c>ElementModel3D::SetMesh</c>
+    /// (P <c>006063A0</c>) replaces the element's whole matrix and its depth with this one's.
     /// </summary>
     public List<MeshInfoSpec> MeshInfos { get; } = new();
+
+    /// <summary>
+    /// <c>Depth(d)</c>: written straight into the model's drawable (<c>ElementModel3D::ReadData</c>,
+    /// P <c>00606150</c>), where it lasts until an event changes the mesh.
+    /// </summary>
+    public float? Depth { get; set; }
+
+    /// <summary><c>InheritMeshInfo("element")</c>: a Model3D made before this one, whose MeshInfo table it shares.</summary>
+    public string? InheritMeshInfo { get; set; }
 
     // ---- GameExt ---------------------------------------------------------------------------------
 
@@ -544,6 +553,12 @@ public static class ElementReader
                 break;
             case "EventMesh" when n >= 1 && s.Kind == ElementKind.Model3D:
                 s.EventMesh = EngineArgs.String(line.Arguments[0]);
+                break;
+            case "Depth" when n >= 1 && s.Kind == ElementKind.Model3D:
+                s.Depth = EngineArgs.FloatAt(line, 0);
+                break;
+            case "InheritMeshInfo" when n >= 1 && s.Kind == ElementKind.Model3D:
+                s.InheritMeshInfo = EngineArgs.String(line.Arguments[0]);
                 break;
 
             // ---- GameExt ----

@@ -199,6 +199,10 @@ one's for the same key.
   line it has once replaced. **Duplicate** (Ctrl+D) copies the selection right after itself.
   Copies get names of their own (`name_1`, `name_2`), elements and transforms alike, and so do
   the events an `EventOutput` sends; templates keep theirs.
+- **Save as snippet** (the Edit menu and the tree's menu) keeps the selected blocks under a name;
+  **Insert saved** (there and in the toolbar's **Insert**) puts one into any HUD as a paste is,
+  inside the selection where it fits, renamed where its names are taken. Snippets are `.hud`
+  files in a `Snippets` folder beside the editor's settings, which the menu opens.
 - **Repeat** (Ctrl+Shift+D) makes copies of the selection in a row, each a step further on the
   screen than the last (the step in pixels, across and down, starting as wide as the selection),
   named as Duplicate names copies; one undo step.

@@ -162,7 +162,16 @@ one's for the same key.
   `playerNobjectives`. The templates of the map, the targets, the seating chart, a segmented bar
   and a list keep their names, as the game finds them by keyword.
 - Dragging an element changes its last `Position` line, in that line's own mode, through the
-  inverse of the matrix the game draws it with.
+  inverse of the matrix the game draws it with. Dragging one of several selected elements moves
+  them all, in one undo step. An edge or the centre of what is dragged snaps to the edges and
+  centres of the other elements drawn and to the screen's edges and centre lines, shown by a
+  pink line; hold **Alt** not to snap, and **Shift** to keep to one axis.
+- **Arrange** (the Edit menu, and the tree's and the canvas's right-click menus) lines the
+  selection up as it is drawn: align left, centres, right, top, middles or bottom (one element
+  with the screen, several with the box round them all); space out across or down, with the
+  same gap between each (three or more; the outermost two stay); match the width, height or
+  size of the element picked last, the one with the cross, for each `BitmapRect` or `Rect`, in
+  its own unit. Each is one undo step.
 - **Cut**, **Copy** and **Paste** (Ctrl+X, C, V) carry blocks as `.hud` text, so they also go to
   and come from a text editor or another copy of the editor. Pasted blocks go inside the selected
   element when it can hold them, else after it; lines of text paste into the selected block, a

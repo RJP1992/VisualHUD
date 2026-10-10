@@ -6,7 +6,8 @@
              xmlns:views="clr-namespace:SwbfHudEditor.App.Views"
              mc:Ignorable="d"
              Background="{StaticResource CanvasBrush}"
-             Focusable="True" FocusVisualStyle="{x:Null}" PreviewKeyDown="Canvas_PreviewKeyDown">
+             Focusable="True" FocusVisualStyle="{x:Null}" PreviewKeyDown="Canvas_PreviewKeyDown"
+             PreviewKeyUp="Canvas_PreviewKeyUp">
     <UserControl.Resources>
         <views:InverseBoolConverter x:Key="NotBool" />
     </UserControl.Resources>

@@ -150,6 +150,8 @@
                     <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
                               ToolTip="Screen pixels: they stay the same size at every resolution." />
                 </MenuItem>
+                <MenuItem x:Name="EditArrange" Header="_Arrange"
+                          ToolTip="Line the selection up as it is drawn on the screen: align, space out, the same size." />
                 <Separator />
                 <MenuItem Header="_Find..." Command="{x:Static ApplicationCommands.Find}" InputGestureText="Ctrl+F"
                           ToolTip="Find text in the arguments of the open files: element names, events, textures, text keys." />
@@ -293,6 +295,8 @@
                                         <MenuItem Header="To _Pixels" Tag="Pixels" Click="ConvertUnits_Click"
                                                   ToolTip="Screen pixels: they stay the same size at every resolution." />
                                     </MenuItem>
+                                    <MenuItem x:Name="TreeArrange" Header="_Arrange"
+                                              ToolTip="Line the selection up as it is drawn on the screen: align, space out, the same size." />
                                     <Separator />
                                     <!-- On the canvas only: what is hidden here is still in the file. -->
                                     <MenuItem Header="Show and hide">

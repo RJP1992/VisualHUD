@@ -54,16 +54,26 @@ public partial class HudCanvas : UserControl
     private bool _ready;
     private bool _fitOnNextLayout = true;
 
-    // Drag state
+    // Drag state: the element pressed, everything that moves with it, and their Position numbers before.
     private HudBlock? _dragBlock;
-    private LaidOutElement? _dragElement;
     private Point _dragStartMouse;
-    private HudBlock? _dragPositionBlock;
-    private HudArgument? _dragOriginalX;
-    private HudArgument? _dragOriginalY;
-    private Vector2 _dragStartValue;
+    private List<HudBlock> _dragBlocks = new();
+    private List<ArgumentChange> _dragOriginals = new();
     private bool _isDragging;
     private const double DragThresholdPx = 3;
+    // A press on an element of a selection of several keeps the selection, to drag it all; released
+    // without a drag, that element alone is picked.
+    private HudBlock? _pickOnRelease;
+
+    // Snapping while dragging: what is dragged, on the screen, before it moved, and the lines it can meet.
+    private Rect _dragStartBounds = Rect.Empty;
+    private readonly List<double> _snapXs = new();
+    private readonly List<double> _snapYs = new();
+    private readonly List<FrameworkElement> _guides = new();
+    private const double SnapPx = 6;
+    private static readonly Brush GuideBrush = GuideColour();
+    // Alt held during a drag: its release must not open the menu.
+    private bool _altInDrag;
 
     // Click-cycle selection: clicking again at the same spot steps down through a stack of elements.
     private HudBlock? _currentSelection;
@@ -1264,7 +1274,7 @@ public partial class HudCanvas : UserControl
     /// MeshInfo's for a model), through the inverse of its parent's matrix, in the line's own unit. An element
     /// inside another one moved too is left to move with it; one without a Position line stays.
     /// </summary>
-    public List<ArgumentChange> MoveChanges(IEnumerable<HudBlock> blocks, double dx, double dy)
+    public List<ArgumentChange> MoveChanges(IEnumerable<HudBlock> blocks, double dx, double dy, bool keepKinds = false)
     {
         var changes = new List<ArgumentChange>();
         if (_layout is null) return changes;
@@ -1279,7 +1289,8 @@ public partial class HudCanvas : UserControl
             {
                 var old = line.Arguments[i];
                 var value = EngineArgs.Float(old) + (i == 0 ? delta.X : delta.Y);
-                var kind = old.Kind == HudArgKind.Integer && value != Math.Round(value) ? HudArgKind.Float : old.Kind;
+                // A whole number stays whole for a drag; a nudge or an alignment takes the fraction.
+                var kind = !keepKinds && old.Kind == HudArgKind.Integer && value != Math.Round(value) ? HudArgKind.Float : old.Kind;
                 var changed = value == EngineArgs.Float(old) ? old
                     : new HudArgument(kind, kind == HudArgKind.Integer ? FormatForKind(value, kind) : HudArgument.FromFloat(value).Raw);
                 // Both numbers, moved or not, so a run of nudges in any direction joins one undo step.
@@ -1321,6 +1332,7 @@ public partial class HudCanvas : UserControl
         var canCycle = sameSpot && _currentSelection is not null && stack.Contains(_currentSelection);
 
         HudBlock target;
+        _pickOnRelease = null;
         if (canCycle)
         {
             target = _currentSelection!;
@@ -1329,30 +1341,19 @@ public partial class HudCanvas : UserControl
         else
         {
             target = stack[0];
-            _currentSelection = target;
-            BlockSelected?.Invoke(this, target);
             _clickCycleArmed = false;
+            if (_selection.Count > 1 && _selection.Contains(target) && (Keyboard.Modifiers & ModifierKeys.Control) == 0)
+                _pickOnRelease = target;
+            else
+            {
+                _currentSelection = target;
+                BlockSelected?.Invoke(this, target);
+            }
         }
 
         _lastDownPos = pos;
         _dragBlock = target;
-        _dragElement = _layout?.Find(target);
         _dragStartMouse = pos;
-        // The engine reads the last Position line, so that is the one a drag moves.
-        _dragPositionBlock = _dragElement?.PositionOwner.Children.LastOrDefault(c => !c.HasBody && c.Name == "Position");
-        if (_dragPositionBlock is { } p && p.Arguments.Count >= 2)
-        {
-            _dragOriginalX = p.Arguments[0];
-            _dragOriginalY = p.Arguments[1];
-            _dragStartValue = new Vector2(EngineArgs.Float(p.Arguments[0]), EngineArgs.Float(p.Arguments[1]));
-        }
-        else
-        {
-            _dragPositionBlock = null;
-            _dragOriginalX = null;
-            _dragOriginalY = null;
-        }
-
         _isDragging = false;
         CanvasSurface.CaptureMouse();
         e.Handled = true;
@@ -1364,46 +1365,196 @@ public partial class HudCanvas : UserControl
         var current = e.GetPosition(CanvasSurface);
         var dx = current.X - _dragStartMouse.X;
         var dy = current.Y - _dragStartMouse.Y;
-        if (!_isDragging && Math.Abs(dx) < DragThresholdPx && Math.Abs(dy) < DragThresholdPx) return;
-        _isDragging = true;
+        if (!_isDragging)
+        {
+            if (Math.Abs(dx) < DragThresholdPx && Math.Abs(dy) < DragThresholdPx) return;
+            _isDragging = true;
+            StartDrag();
+        }
+        DragBy(dx, dy, Keyboard.Modifiers);
+    }
 
-        if (_dragElement is null || _dragPositionBlock is null) return;
-        // The inverse of the matrix its parent hands it, then of its Position's mode.
-        var delta = _dragElement.PositionDeltaFor((float)dx, (float)dy);
-        var p = _dragPositionBlock;
-        p.Arguments[0] = p.Arguments[0] with { Raw = FormatForKind(_dragStartValue.X + delta.X, p.Arguments[0].Kind) };
-        p.Arguments[1] = p.Arguments[1] with { Raw = FormatForKind(_dragStartValue.Y + delta.Y, p.Arguments[1].Kind) };
+    /// <summary>Start dragging an element, as a press on it and a move do: the tests' way in.</summary>
+    internal void BeginDrag(HudBlock pressed)
+    {
+        _dragBlock = pressed;
+        _isDragging = true;
+        StartDrag();
+    }
+
+    /// <summary>
+    /// Move what is dragged by (dx, dy) screen pixels from where it started. Shift keeps to the axis moved
+    /// along most; an edge or the centre snaps to others' unless Alt is held.
+    /// </summary>
+    internal void DragBy(double dx, double dy, ModifierKeys modifiers)
+    {
+        if (_dragBlock is null || _dragOriginals.Count == 0) return;
+        var across = true;
+        var down = true;
+        if ((modifiers & ModifierKeys.Shift) != 0)
+        {
+            if (Math.Abs(dx) >= Math.Abs(dy)) (dy, down) = (0, false);
+            else (dx, across) = (0, false);
+        }
+        (double? X, double? Y) met = (null, null);
+        if ((modifiers & ModifierKeys.Alt) != 0) _altInDrag = true;
+        else met = Snap(ref dx, ref dy, across, down);
+        Guides = met;
+
+        // From where they were, each time: the numbers keep their kind, as a drag of one always has.
+        foreach (var o in _dragOriginals) o.Line.Arguments[o.Index] = o.Old;
+        foreach (var c in MoveChanges(_dragBlocks, dx, dy, keepKinds: true)) c.Line.Arguments[c.Index] = c.New;
         _reuseVisuals = true;
         Render();
+        DrawGuides(met.X, met.Y);
         BlockDragged?.Invoke(this, _dragBlock);
+    }
+
+    /// <summary>
+    /// A drag begins: what it moves (the whole selection when the element pressed is in it), their numbers as
+    /// they are, and the lines they can snap to: the edges and centres of every other element drawn, and the
+    /// screen's edges and centre lines.
+    /// </summary>
+    private void StartDrag()
+    {
+        _altInDrag = false;
+        _pickOnRelease = null;
+        _dragBlocks = _selection.Count > 1 && _selection.Contains(_dragBlock!) ? _selection.ToList() : new List<HudBlock> { _dragBlock! };
+        _dragOriginals = MoveChanges(_dragBlocks, 0, 0);
+        var moving = _dragBlocks.Select(b => _layout?.Find(b)).OfType<LaidOutElement>().ToList();
+        _dragStartBounds = Rect.Empty;
+        foreach (var m in moving) _dragStartBounds.Union(ScreenBounds(m));
+        _snapXs.Clear();
+        _snapYs.Clear();
+        _snapXs.AddRange(new[] { 0, _screen.Width / 2.0, _screen.Width });
+        _snapYs.AddRange(new[] { 0, _screen.Height / 2.0, _screen.Height });
+        if (_layout is null) return;
+        foreach (var other in _layout.All)
+        {
+            if (!_visuals.ContainsKey(other.Block) || moving.Any(m => ReferenceEquals(m, other) || IsInside(other, m))) continue;
+            var b = ScreenBounds(other);
+            if (b.IsEmpty) continue;
+            _snapXs.AddRange(new[] { b.Left, b.Left + b.Width / 2, b.Right });
+            _snapYs.AddRange(new[] { b.Top, b.Top + b.Height / 2, b.Bottom });
+        }
+    }
+
+    /// <summary>
+    /// Shift (dx, dy) so an edge or the centre of what is dragged meets the nearest line within reach (a few
+    /// pixels of the view, whatever the zoom); the lines met, to draw.
+    /// </summary>
+    private (double? X, double? Y) Snap(ref double dx, ref double dy, bool across, bool down)
+    {
+        if (_dragStartBounds.IsEmpty) return (null, null);
+        var reach = SnapReach;
+        var b = _dragStartBounds;
+        var x = across ? Nearest(new[] { b.Left, b.Left + b.Width / 2, b.Right }, dx, _snapXs, reach) : null;
+        var y = down ? Nearest(new[] { b.Top, b.Top + b.Height / 2, b.Bottom }, dy, _snapYs, reach) : null;
+        if (x is { } sx) dx += sx.Shift;
+        if (y is { } sy) dy += sy.Shift;
+        return (x?.Line, y?.Line);
+    }
+
+    private static (double Line, double Shift)? Nearest(double[] features, double moved, List<double> lines, double reach)
+    {
+        (double Line, double Shift)? best = null;
+        foreach (var feature in features)
+            foreach (var line in lines)
+            {
+                var shift = line - (feature + moved);
+                if (Math.Abs(shift) <= reach && (best is null || Math.Abs(shift) < Math.Abs(best.Value.Shift))) best = (line, shift);
+            }
+        return best;
+    }
+
+    private static Brush GuideColour()
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(0xff, 0x4f, 0xd8));
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>The lines the drag snapped to last: a screen x, a screen y.</summary>
+    internal (double? X, double? Y) Guides { get; private set; }
+
+    /// <summary>How far, in screen pixels, an edge snaps from at this zoom.</summary>
+    internal double SnapReach => SnapPx / Math.Max(ZoomTransform.ScaleX, 0.01);
+
+    /// <summary>The lines a drag snapped to, across the screen; none to clear them.</summary>
+    private void DrawGuides(double? x, double? y)
+    {
+        foreach (var guide in _guides) CanvasSurface.Children.Remove(guide);
+        _guides.Clear();
+        var thickness = 1 / Math.Max(ZoomTransform.ScaleX, 0.01);
+        if (x is { } gx) AddGuide(new Line { X1 = gx, Y1 = 0, X2 = gx, Y2 = _screen.Height });
+        if (y is { } gy) AddGuide(new Line { X1 = 0, Y1 = gy, X2 = _screen.Width, Y2 = gy });
+
+        void AddGuide(Line line)
+        {
+            line.Stroke = GuideBrush;
+            line.StrokeThickness = thickness;
+            line.IsHitTestVisible = false;
+            Panel.SetZIndex(line, int.MaxValue);
+            CanvasSurface.Children.Add(line);
+            _guides.Add(line);
+        }
+    }
+
+    /// <summary>An element's extent on the screen: the box round the outline drawn when it is selected.</summary>
+    internal Rect ScreenBounds(LaidOutElement e)
+    {
+        var bounds = Rect.Empty;
+        foreach (var p in OutlineOf(e)) bounds.Union(p);
+        return bounds;
+    }
+
+    /// <summary>A block's extent on the screen, if it is laid out and draws or has a size.</summary>
+    public Rect? ScreenBoundsOf(HudBlock block) =>
+        _layout?.Find(block) is { } e && ScreenBounds(e) is { IsEmpty: false } bounds ? bounds : null;
+
+    /// <summary>Alt released after a drag it turned snapping off for: not to the menu.</summary>
+    private void Canvas_PreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        if (!_altInDrag || e.Key != Key.System || e.SystemKey is not (Key.LeftAlt or Key.RightAlt)) return;
+        _altInDrag = false;
+        e.Handled = true;
+    }
+
+    /// <summary>End a drag: what it changed goes to the undo history as one step.</summary>
+    internal void EndDrag()
+    {
+        var block = _dragBlock;
+        var originals = _dragOriginals;
+        _dragBlock = null;
+        _pickOnRelease = null;
+        _dragOriginals = new List<ArgumentChange>();
+        _isDragging = false;
+        _clickCycleArmed = false;
+        Guides = (null, null);
+        DrawGuides(null, null);
+        var changes = originals.Select(o => o with { New = o.Line.Arguments[o.Index] }).Where(c => c.New != c.Old).ToList();
+        if (block is null || changes.Count == 0) return;
+        var moved = changes.Select(c => c.Line).Distinct().Count();
+        BlockDragCommitted?.Invoke(this, new ArgumentsEdit(changes, moved == 1 ? $"move {block.Name}" : $"move {moved} elements", block));
     }
 
     private void Canvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (CanvasSurface.IsMouseCaptured) CanvasSurface.ReleaseMouseCapture();
-        var wasDragging = _isDragging;
-        var block = _dragBlock;
-        var posBlock = _dragPositionBlock;
-        var origX = _dragOriginalX;
-        var origY = _dragOriginalY;
-
-        _dragBlock = null;
-        _dragElement = null;
-        _dragPositionBlock = null;
-        _dragOriginalX = null;
-        _dragOriginalY = null;
-        _isDragging = false;
-
-        if (wasDragging)
+        if (_isDragging)
         {
-            _clickCycleArmed = false;
-            if (block is null || posBlock is null || origX is null || origY is null) return;
-            var edits = new List<IHudEdit>(2)
-            {
-                new ReplaceArgumentEdit(posBlock, 0, origX, posBlock.Arguments[0], affected: block),
-                new ReplaceArgumentEdit(posBlock, 1, origY, posBlock.Arguments[1], affected: block),
-            };
-            BlockDragCommitted?.Invoke(this, new CompositeEdit(edits, $"move {block.Name}"));
+            EndDrag();
+            return;
+        }
+        var pick = _pickOnRelease;
+        _dragBlock = null;
+        _pickOnRelease = null;
+        _dragOriginals = new List<ArgumentChange>();
+
+        if (pick is not null)
+        {
+            _currentSelection = pick;
+            BlockSelected?.Invoke(this, pick);
             return;
         }
 

@@ -189,6 +189,12 @@ one's for the same key.
   everything in it, or a whole file, in one undo step: Viewport makes a HUD follow the
   resolution. Choose the resolution the HUD was made for in **Screen** first. A VehicleSeating's
   own `Position` is left as it is, as the game reads it as pixels whatever its unit.
+- **Shapes.** A `BitmapRect` has three buttons after its numbers. **Square** sets the height that
+  draws it as tall as it is wide on the canvas's **Screen**, whatever stretches it: the stock
+  layout's widening (a stock file's square is not written square), GameExt's layout, its groups'
+  `Scale`. The second sets the height for the texture's own shape, over the part `TexCoords`
+  shows. The lock keeps the drawn shape as the width is changed: the height follows, in the same
+  undo step. Each writes the height in the line's own unit.
 - The Properties panel's **Add** tab offers every key the game reads for the selected block, by
   the class that reads it (an element's own, its group base, every element's) and GameExt's,
   grouped and with a filter. A template such as `MeshInfo`, `Segment` or a Target template gets

@@ -11,25 +11,6 @@ namespace SwbfHudEditor.App.Tests;
 /// <summary>Additive bitmaps add, and the Shadow style draws the game's black copy under a bitmap or a text.</summary>
 public class BlendTests
 {
-    /// <summary>A 4 x 4 32-bit TGA, top row first, every pixel this colour.</summary>
-    private static byte[] Tga(byte r, byte g, byte b, byte a)
-    {
-        var bytes = new byte[18 + 16 * 4];
-        bytes[2] = 2;
-        bytes[12] = 4;
-        bytes[14] = 4;
-        bytes[16] = 32;
-        bytes[17] = 0x28;
-        for (var i = 18; i < bytes.Length; i += 4)
-        {
-            bytes[i] = b;
-            bytes[i + 1] = g;
-            bytes[i + 2] = r;
-            bytes[i + 3] = a;
-        }
-        return bytes;
-    }
-
     private const string Hud = """
         FileInfo("test")
         {
@@ -75,7 +56,7 @@ public class BlendTests
     [Fact]
     public void An_Additive_Bitmap_Is_Its_Colour_With_No_Alpha_So_It_Adds()
     {
-        UiThread.WithWindow(Hud, new Dictionary<string, byte[]> { ["square.tga"] = Tga(255, 255, 255, 128) }, (w, _) =>
+        UiThread.WithWindow(Hud, new Dictionary<string, byte[]> { ["square.tga"] = TestTextures.Tga(4, 4, 255, 255, 255, 128) }, (w, _) =>
         {
             var rect = Assert.IsType<Rectangle>(w.Canvas.VisualOf(Named(w, "glow")));
             var image = ImageOf(rect);
@@ -90,7 +71,7 @@ public class BlendTests
     [Fact]
     public void A_Shadow_Bitmap_Draws_A_Black_Copy_At_Half_Its_Alpha_Down_And_Right_On_The_Screen()
     {
-        UiThread.WithWindow(Hud, new Dictionary<string, byte[]> { ["square.tga"] = Tga(255, 255, 255, 255) }, (w, _) =>
+        UiThread.WithWindow(Hud, new Dictionary<string, byte[]> { ["square.tga"] = TestTextures.Tga(4, 4, 255, 255, 255, 255) }, (w, _) =>
         {
             var pair = Assert.IsType<Canvas>(w.Canvas.VisualOf(Named(w, "shaded")));
             var shadow = (Rectangle)pair.Children[0];

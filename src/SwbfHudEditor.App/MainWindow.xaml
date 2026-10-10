@@ -323,7 +323,8 @@
                                  PropertyInsertRequested="Properties_PropertyInsertRequested"
                                  PropertyDeleteRequested="Properties_PropertyDeleteRequested"
                                  RenameRequested="Properties_RenameRequested"
-                                 UnitChangeRequested="Properties_UnitChangeRequested" />
+                                 UnitChangeRequested="Properties_UnitChangeRequested"
+                                 ShapeRefused="Properties_ShapeRefused" />
         </Grid>
     </DockPanel>
     <Window.InputBindings>

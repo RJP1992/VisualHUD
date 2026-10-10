@@ -429,6 +429,10 @@ public partial class HudCanvas : UserControl
     /// <summary>How the canvas lays a block out now, if it is an element.</summary>
     public LaidOutElement? LaidOut(HudBlock block) => _layout?.Find(block);
 
+    /// <summary>A texture's size in texels, if it is found.</summary>
+    public (int Width, int Height)? TextureSizeOf(string name) =>
+        _textures?.Get(name) is { } t ? (t.PixelWidth, t.PixelHeight) : null;
+
     /// <summary>The resolution the canvas draws at.</summary>
     public HudScreen ScreenSize => _screen;
 

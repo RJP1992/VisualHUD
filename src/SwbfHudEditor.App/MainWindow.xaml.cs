@@ -74,6 +74,9 @@ public partial class MainWindow : Window
         Properties.ParentOf = block => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
         Properties.KnownEvents = KnownEvents;
         Properties.BasisOf = BasisFor;
+        Properties.DrawnAspect = DrawnAspect;
+        Properties.HeightForAspect = HeightForAspect;
+        Properties.TextureAspect = TextureAspect;
         Properties.Preview = () => Canvas.Refresh();
         _undo.Changed += (_, _) =>
         {
@@ -1759,6 +1762,53 @@ public partial class MainWindow : Window
         if (!Properties.RefreshValues()) Properties.SetBlock(Tree.SelectedItem as HudBlock);
     }
 
+    // ---- Shapes: a BitmapRect's height for the shape it is drawn with -------------------------------
+
+    /// <summary>
+    /// How many screen pixels one of the element's own pixels takes, across and down: its matrix's axes,
+    /// with the stock layout's stretch and band, GameExt's layout and every group's scale in them.
+    /// </summary>
+    private (double Across, double Down)? DrawnScale(HudBlock element)
+    {
+        if (Canvas.LaidOut(element) is not { } e) return null;
+        var m = e.ToScreen;
+        var across = Math.Sqrt(m.M11 * m.M11 + m.M12 * m.M12);
+        var down = Math.Sqrt(m.M21 * m.M21 + m.M22 * m.M22);
+        return across > 0 && down > 0 ? (across, down) : null;
+    }
+
+    /// <summary>A BitmapRect's drawn width over its drawn height, as the canvas draws it now.</summary>
+    internal double? DrawnAspect(HudBlock element, HudBlock line)
+    {
+        if (DrawnScale(element) is not { } scale || BasisFor(element) is not { } basis || line.Arguments.Count < 2 ||
+            !EngineArgs.IsNumber(line.Arguments[0]) || !EngineArgs.IsNumber(line.Arguments[1])) return null;
+        var mode = UnitConversion.ModeOf(line);
+        var w = basis.ToPixels(mode, EngineArgs.Float(line.Arguments[0]), false) * scale.Across;
+        var h = basis.ToPixels(mode, EngineArgs.Float(line.Arguments[1]), true) * scale.Down;
+        return h > 0 ? w / h : null;
+    }
+
+    /// <summary>The height a BitmapRect needs, in its own unit, to be drawn <paramref name="aspect"/> times as wide as tall.</summary>
+    internal double? HeightForAspect(HudBlock element, HudBlock line, double aspect)
+    {
+        if (aspect <= 0 || DrawnScale(element) is not { } scale || BasisFor(element) is not { } basis || line.Arguments.Count < 2 ||
+            !EngineArgs.IsNumber(line.Arguments[0])) return null;
+        var mode = UnitConversion.ModeOf(line);
+        var drawnWidth = basis.ToPixels(mode, EngineArgs.Float(line.Arguments[0]), false) * scale.Across;
+        var heightPixels = drawnWidth / aspect / scale.Down;
+        return Math.Round(basis.ToRelative(mode, (float)heightPixels, true), 6);
+    }
+
+    /// <summary>The element's texture's width over its height, over the part its TexCoords show.</summary>
+    internal double? TextureAspect(HudBlock element)
+    {
+        if (Canvas.LaidOut(element) is not { Texture: { } name } e || Canvas.TextureSizeOf(name) is not { } size) return null;
+        var uv = e.Spec.TexCoords;
+        var du = Math.Abs(uv.U1 - uv.U0);
+        var dv = Math.Abs(uv.V1 - uv.V0);
+        return du > 0 && dv > 0 && size.Height > 0 ? size.Width * du / (size.Height * dv) : null;
+    }
+
     // ---- Units: a line's numbers rewritten in another unit, so nothing moves ------------------------------
 
     /// <summary>
@@ -1836,6 +1886,8 @@ public partial class MainWindow : Window
     {
         if (sender is MenuItem { Tag: string name } && Enum.TryParse<RelativeMode>(name, out var to)) ConvertUnits(SelectedItems, to);
     }
+
+    private void Properties_ShapeRefused(object? sender, string why) => StatusText.Text = why;
 
     /// <summary>A unit chosen in the Properties panel: the line's numbers follow.</summary>
     private void Properties_UnitChangeRequested(object? sender, UnitChangeRequestedEventArgs e)

@@ -69,6 +69,14 @@ public partial class PropertyPanel : UserControl
     /// <summary>The sizes the shown block's numbers are read against, for numbers typed in pixels.</summary>
     public Func<HudBlock, UnitBasis?>? BasisOf { get; set; }
 
+    /// <summary>A BitmapRect's drawn width over height; the height for a drawn shape; the texture's shape.</summary>
+    public Func<HudBlock, HudBlock, double?>? DrawnAspect { get; set; }
+    public Func<HudBlock, HudBlock, double, double?>? HeightForAspect { get; set; }
+    public Func<HudBlock, double?>? TextureAspect { get; set; }
+
+    /// <summary>Keep a BitmapRect's drawn shape when its width changes; it stays as other elements are picked.</summary>
+    private bool _keepShape;
+
     public PropertyPanel()
     {
         InitializeComponent();
@@ -340,6 +348,7 @@ public partial class PropertyPanel : UserControl
         if (UnitConversion.Of(leaf.Name) is { } unit && leaf.Arguments.Count <= unit.Mode &&
             UnitConversion.CanConvert(leaf, unit.Default))
             panel.Children.Add(ImpliedUnitEditor(leaf, unit));
+        if (leaf.Name == "BitmapRect" && leaf.Arguments.Count >= 2) panel.Children.Add(ShapeButtons(leaf));
         return panel;
     }
 
@@ -385,6 +394,76 @@ public partial class PropertyPanel : UserControl
         grid.Children.Add(box);
         grid.Children.Add(open);
         return grid;
+    }
+
+    /// <summary>Square, the texture's shape, and a lock that keeps the drawn shape as the width changes.</summary>
+    private FrameworkElement ShapeButtons(HudBlock leaf)
+    {
+        Button ShapeButton(string glyph, string tip, Func<double?> aspect, string refusal)
+        {
+            var button = new Button
+            {
+                Style = ToolButton,
+                Content = new TextBlock { Text = glyph, Style = IconStyle, FontSize = 12 },
+                MinWidth = 24,
+                MinHeight = 22,
+                Padding = new Thickness(3),
+                Margin = new Thickness(0, 1, 2, 1),
+                ToolTip = tip,
+            };
+            button.Click += (_, _) =>
+            {
+                if (_block is null) return;
+                if (aspect() is not { } a || HeightForAspect?.Invoke(_block, leaf, a) is not { } h)
+                {
+                    ShapeRefused?.Invoke(this, refusal);
+                    return;
+                }
+                SetHeight(leaf, h);
+            };
+            return button;
+        }
+
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 0) };
+        bar.Children.Add(ShapeButton("\uE739", "Square: the height that draws it as tall as wide on the screen, whatever the layout stretches",
+            () => 1.0, "Square needs the element drawn on the canvas, with a width in numbers."));
+        bar.Children.Add(ShapeButton("\uEB9F", "The texture's shape: the height that draws its texture, over the part TexCoords show, unstretched",
+            () => _block is null ? null : TextureAspect?.Invoke(_block),
+            "The texture's shape needs the element drawn on the canvas and its texture found."));
+        var lockButton = new ToggleButton
+        {
+            Content = new TextBlock { Text = _keepShape ? "\uE72E" : "\uE785", Style = IconStyle, FontSize = 12 },
+            IsChecked = _keepShape,
+            MinWidth = 24,
+            MinHeight = 22,
+            Padding = new Thickness(3),
+            Margin = new Thickness(0, 1, 2, 1),
+            ToolTip = "Keep the shape: a new width changes the height with it, so the drawn shape stays",
+        };
+        lockButton.Click += (_, _) =>
+        {
+            _keepShape = lockButton.IsChecked == true;
+            ((TextBlock)lockButton.Content).Text = _keepShape ? "\uE72E" : "\uE785";
+        };
+        bar.Children.Add(lockButton);
+        return bar;
+    }
+
+    /// <summary>A shape asked for that the panel cannot work out, with why.</summary>
+    public event EventHandler<string>? ShapeRefused;
+
+    /// <summary>The BitmapRect's height, in the kind the line had it where it can.</summary>
+    private void SetHeight(HudBlock leaf, double height)
+    {
+        var current = leaf.Arguments[1];
+        var whole = Math.Abs(height - Math.Round(height)) < 1e-6;
+        var changed = current.Kind == HudArgKind.Integer && whole
+            ? HudArgument.FromInt((long)Math.Round(height))
+            : HudArgument.FromFloat(height);
+        if (changed == current) return;
+        leaf.Arguments[1] = changed;
+        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, new[] { new ArgChange(1, current, changed) }, _block));
+        RefreshValues();
     }
 
     /// <summary>The unit names a line's mode takes: Frame only for a Position.</summary>
@@ -671,8 +750,26 @@ public partial class PropertyPanel : UserControl
         }
         if (!IsValidForKind(text, kind)) return;
         var changed = new HudArgument(kind, text);
+        // With the shape kept, a BitmapRect's new width brings its height along, in the same undo step.
+        var shape = _keepShape && leaf.Name == "BitmapRect" && index == 0 && _block is not null
+            ? DrawnAspect?.Invoke(_block, leaf)
+            : null;
         leaf.Arguments[index] = changed;
-        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, new[] { new ArgChange(index, current, changed) }, _block));
+        var changes = new List<ArgChange> { new(index, current, changed) };
+        if (shape is { } aspect && HeightForAspect?.Invoke(_block!, leaf, aspect) is { } h)
+        {
+            var oldHeight = leaf.Arguments[1];
+            var newHeight = oldHeight.Kind == HudArgKind.Integer && Math.Abs(h - Math.Round(h)) < 1e-6
+                ? HudArgument.FromInt((long)Math.Round(h))
+                : HudArgument.FromFloat(h);
+            if (newHeight != oldHeight)
+            {
+                leaf.Arguments[1] = newHeight;
+                changes.Add(new ArgChange(1, oldHeight, newHeight));
+            }
+        }
+        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, changes, _block));
+        if (changes.Count > 1) RefreshValues();
     }
 
     private static bool IsUnitNumber(HudBlock leaf, int index) =>

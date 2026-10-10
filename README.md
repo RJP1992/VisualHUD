@@ -231,6 +231,10 @@ one's for the same key.
 - In the Properties panel, a colour is a swatch that opens a picker and shows the change as you
   pick; a mode, an alignment, a style, a font or an event is a list, which takes typing too; an
   on/off line is a switch.
+- With several elements selected, the Properties panel shows the lines they all have: a value
+  they share shows, one they differ in is blank, and a change goes to each of them, the other
+  numbers of a line staying each its own. Removing a line, choosing a unit and the **Add** tab work
+  on all of them too. Each is one undo step.
 - Up and Down step a number, and so does the mouse wheel once the box is clicked (over any other
   box the wheel scrolls the panel): by one for a whole number or a count of pixels, by 0.01 for
   any other fraction; **Shift** ten times as far, **Alt** a hundred times, **Ctrl** a tenth. A

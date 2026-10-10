@@ -20,6 +20,12 @@ public sealed record ArgChange(int Index, HudArgument Old, HudArgument New);
 /// </summary>
 public sealed record PropertyEditedEventArgs(HudBlock Leaf, IReadOnlyList<ArgChange> Changes, HudBlock? SelectedBlock, bool Stepped = false);
 
+/// <summary>
+/// Fired when a line shown for several elements was edited: each of their lines of that name is changed
+/// already, every argument changed listed, for one undo step.
+/// </summary>
+public sealed record ManyEditedEventArgs(string LineName, IReadOnlyList<SwbfHudEditor.Core.Edits.ArgumentChange> Changes, bool Stepped);
+
 /// <summary>Fired when the user clicks an "Add" tab button to insert a property as a child of
 /// <see cref="Target"/>. Carries the already-built leaf <see cref="Property"/> so the host can
 /// wrap the insert in an undo edit and add it at the correct position. <see cref="CopiedLast"/>: a
@@ -95,6 +101,91 @@ public partial class PropertyPanel : UserControl
     private bool _stepping;
     private int _wheel;
 
+    // With several elements selected: each line shown stands for the line of its name in each of them.
+    private IReadOnlyList<HudBlock>? _many;
+    private readonly Dictionary<HudBlock, List<(HudBlock Block, HudBlock Line)>> _proxies = new(ReferenceEqualityComparer.Instance);
+
+    public event EventHandler<ManyEditedEventArgs>? ManyEdited;
+
+    /// <summary>The lines shown, in order: the block's own, or for several the ones standing for theirs.</summary>
+    internal IReadOnlyList<HudBlock> ShownLines => _shownLeaves;
+
+    /// <summary>The elements shown together, or null for one.</summary>
+    internal IReadOnlyList<HudBlock>? Many => _many;
+
+    /// <summary>The lines a line shown for several elements stands for, with their elements; null for a line of one.</summary>
+    internal IReadOnlyList<(HudBlock Block, HudBlock Line)>? LinesOf(HudBlock leaf) => _proxies.TryGetValue(leaf, out var lines) ? lines : null;
+
+    /// <summary>
+    /// Show the lines several elements all have, <paramref name="current"/>'s first: a value they share shows,
+    /// one that differs is blank, and a change goes to each of them.
+    /// </summary>
+    public void SetBlocks(IReadOnlyList<HudBlock> blocks, HudBlock current)
+    {
+        if (blocks.Count <= 1)
+        {
+            SetBlock(current);
+            return;
+        }
+        if (NameBox.IsKeyboardFocusWithin) CommitName();
+        _block = current;
+        _many = blocks.ToList();
+        Rebuild();
+    }
+
+    /// <summary>A line of several: each argument theirs where they all have it alike, else blank.</summary>
+    private static List<HudArgument> Merged(HudBlock lead, IReadOnlyList<HudBlock> lines)
+    {
+        var args = new List<HudArgument>();
+        for (var i = 0; i < lead.Arguments.Count; i++)
+        {
+            var arg = lead.Arguments[i];
+            args.Add(lines.All(l => i < l.Arguments.Count && l.Arguments[i] == arg) ? arg : new HudArgument(arg.Kind, string.Empty));
+        }
+        return args;
+    }
+
+    /// <summary>The lines all the elements shown have, by name, as the one leading has them; the game reads the last of a name.</summary>
+    private List<HudBlock> SharedLeaves()
+    {
+        _proxies.Clear();
+        var shared = new List<HudBlock>();
+        if (_many is null || _block is null) return shared;
+        foreach (var name in _block.Children.Where(c => !c.HasBody).Select(c => c.Name).Distinct())
+        {
+            var pairs = _many.Select(b => (Block: b, Line: b.Children.LastOrDefault(c => !c.HasBody && c.Name == name))).ToList();
+            if (pairs.Any(p => p.Line is null)) continue;
+            var lines = pairs.Select(p => p.Line!).ToList();
+            var proxy = new HudBlock(name);
+            proxy.Arguments.AddRange(Merged(_block.Children.Last(c => !c.HasBody && c.Name == name), lines));
+            _proxies[proxy] = pairs.Select(p => (p.Block, p.Line!)).ToList();
+            shared.Add(proxy);
+        }
+        return shared;
+    }
+
+    /// <summary>
+    /// An edit made in the panel: a line of one goes to the host as it is; a line shown for several is made on
+    /// each of theirs.
+    /// </summary>
+    private void Edited(PropertyEditedEventArgs e)
+    {
+        if (!_proxies.TryGetValue(e.Leaf, out var pairs))
+        {
+            PropertyEdited?.Invoke(this, e);
+            return;
+        }
+        var changes = new List<SwbfHudEditor.Core.Edits.ArgumentChange>();
+        foreach (var (_, line) in pairs)
+            foreach (var change in e.Changes)
+            {
+                if (change.Index >= line.Arguments.Count || line.Arguments[change.Index] == change.New) continue;
+                changes.Add(new SwbfHudEditor.Core.Edits.ArgumentChange(line, change.Index, line.Arguments[change.Index], change.New));
+                line.Arguments[change.Index] = change.New;
+            }
+        if (changes.Count > 0) ManyEdited?.Invoke(this, new ManyEditedEventArgs(e.Leaf.Name, changes, e.Stepped));
+    }
+
     /// <summary>Whether a box takes the wheel: the one being typed in. The tests, whose windows are never active, say so.</summary>
     internal Func<TextBox, bool> TakesWheel { get; set; } = box => box.IsKeyboardFocusWithin;
 
@@ -106,6 +197,7 @@ public partial class PropertyPanel : UserControl
         // element in the tree switches the panel before the box loses focus.
         if (NameBox.IsKeyboardFocusWithin && !ReferenceEquals(block, _block)) CommitName();
         _block = block;
+        _many = null;
         Rebuild();
     }
 
@@ -160,7 +252,7 @@ public partial class PropertyPanel : UserControl
     }
 
     /// <summary>Whether the panel shows this block.</summary>
-    public bool ShowsBlock(HudBlock block) => ReferenceEquals(block, _block);
+    public bool ShowsBlock(HudBlock block) => ReferenceEquals(block, _block) || _many?.Contains(block) == true;
 
     /// <summary>
     /// Put the lines' current values in their editors without building the rows again, as a drag changes
@@ -169,6 +261,21 @@ public partial class PropertyPanel : UserControl
     public bool RefreshValues()
     {
         if (_block is null || RowsPending) return false;
+        if (_many is not null)
+        {
+            // Several: each line shown takes its lines' values again, as long as it stands for the same lines.
+            foreach (var (proxy, pairs) in _proxies)
+            {
+                if (pairs.Any(p => !ReferenceEquals(p.Block.Children.LastOrDefault(c => !c.HasBody && c.Name == proxy.Name), p.Line))) return false;
+                var lead = pairs.FirstOrDefault(p => ReferenceEquals(p.Block, _block)).Line ?? pairs[0].Line;
+                var merged = Merged(lead, pairs.Select(p => p.Line).ToList());
+                for (var i = 0; i < merged.Count && i < proxy.Arguments.Count; i++) proxy.Arguments[i] = merged[i];
+            }
+            foreach (var (editor, leaf, index) in _editors)
+                if (!editor.IsKeyboardFocusWithin && index < leaf.Arguments.Count && editor is TextBox box && box.Text != leaf.Arguments[index].Raw)
+                    box.Text = leaf.Arguments[index].Raw;
+            return true;
+        }
         var leaves = _block.Children.Where(c => !c.HasBody).ToList();
         if (leaves.Count != _shownLeaves.Count || leaves.Where((l, i) => !ReferenceEquals(l, _shownLeaves[i])).Any()) return false;
         foreach (var (editor, leaf, index) in _editors)
@@ -202,6 +309,13 @@ public partial class PropertyPanel : UserControl
     public void RefreshHeader()
     {
         if (_block is null) return;
+        if (_many is not null)
+        {
+            NameRow.Visibility = Visibility.Collapsed;
+            HeaderText.Visibility = Visibility.Visible;
+            HeaderText.Text = $"{_many.Count} elements: the lines they all have. A value they differ in is blank; a change goes to each of them.";
+            return;
+        }
         var name = HudRename.NameOf(_block);
         NameRow.Visibility = name is null ? Visibility.Collapsed : Visibility.Visible;
         HeaderText.Visibility = name is null ? Visibility.Visible : Visibility.Collapsed;
@@ -270,9 +384,11 @@ public partial class PropertyPanel : UserControl
     {
         if (_block is null) return;
         var parent = ParentOf?.Invoke(_block);
-        var leaves = _block.Children.Where(c => !c.HasBody).ToList();
+        var leaves = _many is not null ? SharedLeaves() : _block.Children.Where(c => !c.HasBody).ToList();
         _shownLeaves.AddRange(leaves);
-        if (leaves.Count == 0) Rows.Children.Add(Hint("No lines yet: add what this block should read from the Add tab."));
+        if (leaves.Count == 0)
+            Rows.Children.Add(Hint(_many is not null ? "They have no lines in common: add one to all of them from the Add tab."
+                : "No lines yet: add what this block should read from the Add tab."));
 
         var groups = leaves
             .GroupBy(l => PropertyCatalog.Find(_block, parent, l.Name)?.Group ?? "Other")
@@ -294,7 +410,7 @@ public partial class PropertyPanel : UserControl
             Rows.Children.Add(section);
         }
 
-        var nested = _block.Children.Count(c => c.HasBody);
+        var nested = _many is not null ? 0 : _block.Children.Count(c => c.HasBody);
         if (nested > 0)
             Rows.Children.Add(Hint($"+ {nested} block{(nested == 1 ? "" : "s")} inside, in the Elements tree."));
     }
@@ -364,7 +480,7 @@ public partial class PropertyPanel : UserControl
         if (UnitConversion.Of(leaf.Name) is { } unit && leaf.Arguments.Count <= unit.Mode &&
             UnitConversion.CanConvert(leaf, unit.Default))
             panel.Children.Add(ImpliedUnitEditor(leaf, unit));
-        if (leaf.Name == "BitmapRect" && leaf.Arguments.Count >= 2) panel.Children.Add(ShapeButtons(leaf));
+        if (leaf.Name == "BitmapRect" && leaf.Arguments.Count >= 2 && _many is null) panel.Children.Add(ShapeButtons(leaf));
         return panel;
     }
 
@@ -481,7 +597,7 @@ public partial class PropertyPanel : UserControl
             : HudArgument.FromFloat(height);
         if (changed == current) return;
         leaf.Arguments[1] = changed;
-        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, new[] { new ArgChange(1, current, changed) }, _block));
+        Edited(new PropertyEditedEventArgs(leaf, new[] { new ArgChange(1, current, changed) }, _block));
         RefreshValues();
     }
 
@@ -743,7 +859,7 @@ public partial class PropertyPanel : UserControl
                     .Where(i => leaf.Arguments[start + i] != before[i])
                     .Select(i => new ArgChange(start + i, before[i], leaf.Arguments[start + i]))
                     .ToList();
-                if (changes.Count > 0) PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, changes, _block));
+                if (changes.Count > 0) Edited(new PropertyEditedEventArgs(leaf, changes, _block));
                 Rebuild();
             };
             popup.IsOpen = true;
@@ -819,7 +935,7 @@ public partial class PropertyPanel : UserControl
                 changes.Add(new ArgChange(1, oldHeight, newHeight));
             }
         }
-        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, changes, _block, _stepping));
+        Edited(new PropertyEditedEventArgs(leaf, changes, _block, _stepping));
         if (changes.Count > 1) RefreshValues();
     }
 

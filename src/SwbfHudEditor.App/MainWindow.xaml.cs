@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         Properties.DrawnAspect = DrawnAspect;
         Properties.HeightForAspect = HeightForAspect;
         Properties.TextureAspect = TextureAspect;
+        Properties.ManyEdited += Properties_ManyEdited;
         Properties.Preview = () => Canvas.Refresh();
         _undo.Changed += (_, _) =>
         {
@@ -809,6 +810,25 @@ public partial class MainWindow : Window
         Properties.RefreshDefaultMarks();
     }
 
+    /// <summary>A line shown for several elements edited: theirs all changed, in one undo step.</summary>
+    private void Properties_ManyEdited(object? sender, ManyEditedEventArgs e)
+    {
+        var count = e.Changes.Select(c => c.Line).Distinct().Count();
+        var description = $"{(e.Stepped ? "step" : "edit")} {e.LineName} of {count}";
+        var now = DateTime.UtcNow;
+        if (e.Stepped && _undo.Top is ArgumentsEdit last && last.Description == description && (now - _stepAt).TotalSeconds < 1.5 && last.Covers(e.Changes))
+        {
+            last.Extend(e.Changes);
+            _undo.Touch();
+        }
+        else _undo.Push(new ArgumentsEdit(e.Changes, description, Tree.SelectedItem as HudBlock));
+        if (e.Stepped) _stepAt = now;
+        _knownEvents = null;
+        Canvas.Refresh();
+        RefreshEventList();
+        Properties.RefreshDefaultMarks();
+    }
+
     // When the last step of the arrows or the wheel was taken, to join the next to it.
     private DateTime _stepAt;
 
@@ -828,6 +848,24 @@ public partial class MainWindow : Window
     /// <summary>The Properties panel's delete button: remove that line, as an undoable edit.</summary>
     private void Properties_PropertyDeleteRequested(object? sender, PropertyDeleteRequestedEventArgs e)
     {
+        if (Properties.LinesOf(e.Property) is { } pairs && Properties.Many is { } many)
+        {
+            var edits = new List<IHudEdit>();
+            foreach (var (block, line) in pairs)
+            {
+                var at = block.Children.IndexOf(line);
+                if (at < 0) continue;
+                var delete = new DeleteBlockEdit(block.Children, at, line, affected: block);
+                delete.Apply();
+                edits.Add(delete);
+            }
+            _undo.Push(new CompositeEdit(edits, $"remove {e.Property.Name} from {edits.Count}"));
+            Canvas.Refresh();
+            Properties.SetBlocks(many, e.Target);
+            RefreshEventList();
+            StatusText.Text = $"Removed {e.Property.Name} from {edits.Count} elements.";
+            return;
+        }
         var index = e.Target.Children.IndexOf(e.Property);
         if (index < 0) return;
         e.Target.Children.RemoveAt(index);
@@ -907,6 +945,26 @@ public partial class MainWindow : Window
     /// </summary>
     private void Properties_PropertyInsertRequested(object? sender, PropertyInsertRequestedEventArgs e)
     {
+        if (Properties.Many is { } many && !e.Property.HasBody)
+        {
+            // To each of them that has no line of that name, a copy where it would go in it.
+            var edits = new List<IHudEdit>();
+            var text = HudWriter.Header(e.Property);
+            foreach (var block in many.Where(b => !b.Children.Any(c => !c.HasBody && c.Name.Equals(e.Property.Name, StringComparison.OrdinalIgnoreCase))))
+            {
+                var copy = new HudBlock(e.Property.Name, e.Property.Arguments.ToArray());
+                var at = block.Children.TakeWhile(c => !c.HasBody).Count();
+                var add = new InsertBlockEdit(block.Children, at, copy, $"add {copy.Name}", affected: block);
+                add.Apply();
+                edits.Add(add);
+            }
+            if (edits.Count > 0) _undo.Push(new CompositeEdit(edits, $"add {e.Property.Name} to {edits.Count}"));
+            Canvas.Refresh();
+            Properties.SetBlocks(many, e.Target);
+            RefreshEventList();
+            StatusText.Text = edits.Count == 0 ? $"They all have {e.Property.Name} already." : $"Added {text} to {edits.Count} elements.";
+            return;
+        }
         var target = e.Target;
         // Index = last leaf child + 1, so Rotation/Scale/etc land next to Position instead of
         // getting dumped at the very end after every nested Group. If there are no children yet,
@@ -1239,6 +1297,10 @@ public partial class MainWindow : Window
         CommandManager.InvalidateRequerySuggested();
         var items = SelectedItems;
         Canvas.HighlightBlocks(items.OfType<HudBlock>().ToList(), Tree.SelectedItem as HudBlock);
+        // Several elements: the lines they share, a change going to all of them.
+        var picked = items.OfType<HudBlock>().Where(b => b.HasBody).ToList();
+        if (picked.Count > 1 && Tree.SelectedItem is HudBlock current && picked.Contains(current)) Properties.SetBlocks(picked, current);
+        else if (Properties.Many is not null) Properties.SetBlock(Tree.SelectedItem as HudBlock);
         if (_picked.Count > 1)
             StatusText.Text = $"{_picked.Count} selected: H hides or shows them, Shift+H shows only them, Del deletes them.";
     }
@@ -2004,6 +2066,22 @@ public partial class MainWindow : Window
     /// <summary>A unit chosen in the Properties panel: the line's numbers follow.</summary>
     private void Properties_UnitChangeRequested(object? sender, UnitChangeRequestedEventArgs e)
     {
+        if (Properties.LinesOf(e.Line) is { } pairs && Properties.Many is { } many)
+        {
+            var edits = new List<IHudEdit>();
+            foreach (var (block, line) in pairs)
+                if (BasisFor(block) is { } b && UnitConversion.Convert(line, e.To, b) is { } converted)
+                {
+                    var conversion = new ReplaceArgumentsEdit(line, converted, block);
+                    conversion.Apply();
+                    edits.Add(conversion);
+                }
+            if (edits.Count > 0) _undo.Push(new CompositeEdit(edits, $"{e.Line.Name} of {edits.Count} in {e.To}"));
+            Canvas.Refresh();
+            Properties.SetBlocks(many, e.Target);
+            StatusText.Text = $"{e.Line.Name} in {e.To} for {edits.Count} elements, each where it was.";
+            return;
+        }
         if (BasisFor(e.Target) is not { } basis || UnitConversion.Convert(e.Line, e.To, basis) is not { } args) return;
         var edit = new ReplaceArgumentsEdit(e.Line, args, e.Target);
         edit.Apply();

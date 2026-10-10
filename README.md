@@ -317,7 +317,8 @@ double-click or Enter goes to its line in the Properties panel. It follows every
   a MultilineText's or a Map's replaced `Position`, `Rotation`, `Scale` or `TextBox`; a model's
   `Position`, `Rotation` or `Depth` before its `Mesh`; a model's `BlendMode`; a group's
   `BlendMode` between its children; a name another element in the same view has; an event read
-  that nothing sends; a transform inside an element; a `FileInfo`'s `Widescreen`.
+  that nothing sends; a transform inside an element; a `FileInfo`'s `Widescreen`; a
+  `MeshInfo`'s model not found, which draws only when an event sends it.
 
 ## Snapshots
 

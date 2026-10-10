@@ -218,6 +218,12 @@ public class HudProblemsTests
                 SplitMode("Horizontal")
                 Widescreen(0)
             }
+            Model3D("weapon")
+            {
+                MeshInfo("hud_weapon_missing")
+                {
+                }
+            }
             Group("one")
             {
                 Viewport(1)
@@ -237,7 +243,8 @@ public class HudProblemsTests
                 Viewport(2)
                 Bitmap("same") { }
             }
-            """, (kind, name) => kind == HudAssetKind.Texture && name == "hud_missing");
+            """, (kind, name) => kind == HudAssetKind.Texture && name == "hud_missing" || kind == HudAssetKind.Mesh && name == "hud_weapon_missing");
+        Assert.Equal(ProblemLevel.Note, Assert.Single(At(problems, "MeshInfo")).Level);
         Assert.Equal(ProblemLevel.Error, Assert.Single(At(problems, "FileInfo", "SplitMode")).Level);
         Assert.Contains("off", Assert.Single(At(problems, "FileInfo", "Widescreen")).Message);
         Assert.Contains("viewport 1", Assert.Single(At(problems, "same", "Viewport")).Message);

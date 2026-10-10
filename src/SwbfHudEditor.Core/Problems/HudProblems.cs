@@ -135,8 +135,9 @@ public static partial class HudProblems
             else if (readsLines) Units(block, line, add);
             Assets(block, line, context, add);
         }
+        // A MeshInfo places a model only an event sends, such as a weapon's: it matters only once that is sent.
         if (block.Name == "MeshInfo" && Missing(context, HudAssetKind.Mesh, StringAt(block, 0)))
-            add(ProblemLevel.Warning, block, null, $"Model \"{StringAt(block, 0)}\" is not found in the HUD's folders, the stock ones or an asset folder.");
+            add(ProblemLevel.Note, block, null, $"Model \"{StringAt(block, 0)}\" is not found in the HUD's folders, the stock ones or an asset folder. It draws only when an event sends it, as a weapon's.");
 
         foreach (var child in block.Children.Where(c => c.HasBody)) Walk(child, block, parent, document, context, add);
     }

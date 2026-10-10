@@ -250,6 +250,10 @@ one's for the same key.
   everything in it, or a whole file, in one undo step: Viewport makes a HUD follow the
   resolution. Choose the resolution the HUD was made for in **Screen** first. A VehicleSeating's
   own `Position` is left as it is, as the game reads it as pixels whatever its unit.
+- A `TextBox` has a button that fits the box to the text as it shows now (its lines as laid out,
+  with a pixel to spare so it wraps as it does), its `Position` moved so the text stays where it
+  is; **Edit > Fit text box to text** does the same for the selected Text, adding a `TextBox`
+  if it has none. With its text on the baseline, only the width is fitted.
 - **Shapes.** A `BitmapRect` has three buttons after its numbers. **Square** sets the height that
   draws it as tall as it is wide on the canvas's **Screen**, whatever stretches it: the stock
   layout's widening (a stock file's square is not written square), GameExt's layout, its groups'

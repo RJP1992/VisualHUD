@@ -258,12 +258,17 @@ internal sealed class TextGlyphsVisual : FrameworkElement
         _image = font.Render(layout.Glyphs, solid.Color, false, additive, out _imageArea);
         if (shadow) _shadowImage = font.Render(layout.Glyphs, Colors.Black, false, false, out _shadowArea);
         // What can be clicked: the lines and the box.
-        var bounds = Rect.Empty;
+        var text = Rect.Empty;
         foreach (var line in layout.Lines)
-            bounds.Union(new Rect(line.X, line.Y, Math.Max(line.Width, 1), Math.Max(layout.LineHeight, 1)));
+            text.Union(new Rect(line.X, line.Y, Math.Max(line.Width, 1), Math.Max(layout.LineHeight, 1)));
+        TextExtent = text;
+        var bounds = text;
         if (box is { } b) bounds.Union(b);
         _bounds = bounds;
     }
+
+    /// <summary>Where the text's lines are, without its box, in the element's own pixels.</summary>
+    public Rect TextExtent { get; }
 
     /// <summary>Where the text and its box are, in the element's own pixels.</summary>
     public Rect Bounds => _bounds;

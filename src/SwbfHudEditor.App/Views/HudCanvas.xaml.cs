@@ -483,6 +483,10 @@ public partial class HudCanvas : UserControl
     public (int Width, int Height)? TextureSizeOf(string name) =>
         _textures?.Get(name) is { } t ? (t.PixelWidth, t.PixelHeight) : null;
 
+    /// <summary>Where a Text's lines are drawn now, in its own pixels, if it shows any.</summary>
+    internal Rect? TextExtentOf(HudBlock block) =>
+        _visuals.TryGetValue(block, out var visual) && visual is TextGlyphsVisual { TextExtent: { IsEmpty: false } extent } ? extent : null;
+
     /// <summary>The options the canvas last laid out with: its fonts and textures, its target.</summary>
     internal LayoutOptions? LayoutOptions => _layout?.Options;
 

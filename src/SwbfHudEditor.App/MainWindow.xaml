@@ -187,6 +187,8 @@
                           ToolTip="Put elements in a group, take them out of one, fit a group's Rect to what it holds: nothing moves on the screen." />
                 <MenuItem x:Name="EditArrange" Header="_Arrange"
                           ToolTip="Line the selection up as it is drawn on the screen: align, space out, the same size." />
+                <MenuItem Header="Fit _text box to text" Click="FitTextBox_Click"
+                          ToolTip="Make the selected Text's TextBox the size of its text as it shows now, the text staying where it is." />
                 <MenuItem Header="Lay out for a screen _shape..." Click="ScreenShape_Click"
                           ToolTip="Rewrite the selected file for GameExt's AuthoredRatio: on a screen of the shape chosen it draws as it does now, and GameExt fits it to other screens." />
                 <Separator />

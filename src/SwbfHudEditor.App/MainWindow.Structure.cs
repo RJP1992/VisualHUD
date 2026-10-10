@@ -27,6 +27,7 @@ public partial class MainWindow
 
     private void SetUpStructure()
     {
+        Properties.FitTextBoxRequested += (_, block) => FitTextBox(block);
         CommandBindings.Add(new CommandBinding(GroupCommand, (_, _) => GroupSelection(), (_, e) =>
             e.CanExecute = !TypingInBox && TopSelectedBlocks().Any(IsElement)));
         CommandBindings.Add(new CommandBinding(UngroupCommand, (_, _) => UngroupSelection(), (_, e) =>
@@ -163,6 +164,71 @@ public partial class MainWindow
 
         if (edits.Count > 0) edits.AddRange(keep.Restore(HudLayout.Lay(Documents, options), notes));
         return edits;
+    }
+
+    // ---- A Text's box fitted to its text --------------------------------------------------------------------
+
+    /// <summary>
+    /// A Text's TextBox made the size of its lines as they show now (the text, an example or a long text, as
+    /// the canvas lays it out), with a pixel to spare so it wraps as it does; its Position moved so the text
+    /// stays where it is. With its text on the baseline, only its width.
+    /// </summary>
+    internal bool FitTextBox(HudBlock block)
+    {
+        if (Canvas.LaidOut(block) is not { Kind: ElementKind.Text } e || Canvas.TextExtentOf(block) is not { } text)
+        {
+            StatusText.Text = "Fit the box of a Text whose text shows on the canvas.";
+            return false;
+        }
+        var baseline = e.Spec.TextVAlign == TextVAlign.Baseline;
+        var w = (float)Math.Ceiling(text.Width) + 1;
+        var h = baseline ? e.TextBoxHeight : (float)Math.Ceiling(text.Height) + 1;
+        var shift = new Vector2((float)text.Left, baseline ? 0 : (float)text.Top);
+
+        var edits = new List<IHudEdit>();
+        void Apply(IHudEdit edit)
+        {
+            edit.Apply();
+            edits.Add(edit);
+        }
+        var lines = block.Children.TakeWhile(c => !c.HasBody).Count();
+        var box = Last(block, "TextBox");
+        var boxArgs = new List<HudArgument>
+        {
+            Number((w + 0.0001) / e.ViewWidth, box?.Arguments[0]),
+            Number((h + 0.0001) / e.ViewHeight, box?.Arguments[1]),
+        };
+        if (box is not null) boxArgs.AddRange(box.Arguments.Skip(2));
+        if (box is null) Apply(new InsertBlockEdit(block.Children, lines++, new HudBlock("TextBox", boxArgs.ToArray()), "add TextBox", affected: block));
+        else if (!boxArgs.SequenceEqual(box.Arguments)) Apply(new ReplaceArgumentsEdit(box, boxArgs, block));
+
+        // The box's corner where the text's is: its origin moves by as much, in its parent's pixels.
+        var moved = Vector2.TransformNormal(shift, e.Local);
+        if (moved.LengthSquared() > 1e-8f)
+        {
+            var position = Last(block, "Position");
+            var mode = e.Spec.PositionMode;
+            var x = (position is null ? 0 : EngineArgs.Float(position.Arguments[0])) + EngineMath.ToRelative(mode, moved.X, e.FrameWidth, e.ViewWidth, e.ScreenWidth);
+            var y = (position is null ? 0 : EngineArgs.Float(position.Arguments[1])) + EngineMath.ToRelative(mode, moved.Y, e.FrameHeight, e.ViewHeight, e.ScreenHeight);
+            var args = new List<HudArgument> { Number(x, position?.Arguments[0]), Number(y, position?.Arguments[1]),
+                (position is null ? null : EngineArgs.At(position, 2)) ?? HudArgument.FromInt(0) };
+            if (position is not null) args.AddRange(position.Arguments.Skip(3));
+            if (position is null) Apply(new InsertBlockEdit(block.Children, lines, new HudBlock("Position", args.ToArray()), "add Position", affected: block));
+            else if (!args.SequenceEqual(position.Arguments)) Apply(new ReplaceArgumentsEdit(position, args, block));
+        }
+        if (edits.Count == 0)
+        {
+            StatusText.Text = "The box fits its text already.";
+            return false;
+        }
+        Commit(edits, $"fit the box of {block.Name} \"{block.ItemName}\"", block);
+        StatusText.Text = $"Fitted the box of {block.Name} \"{block.ItemName}\" to its text, {w:0}×{h:0} pixels; the text stayed where it was.";
+        return true;
+    }
+
+    private void FitTextBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (Tree.SelectedItem is HudBlock block) FitTextBox(block);
     }
 
     // ---- Group and ungroup ---------------------------------------------------------------------------------

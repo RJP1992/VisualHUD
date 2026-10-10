@@ -481,6 +481,7 @@ public partial class PropertyPanel : UserControl
             UnitConversion.CanConvert(leaf, unit.Default))
             panel.Children.Add(ImpliedUnitEditor(leaf, unit));
         if (leaf.Name == "BitmapRect" && leaf.Arguments.Count >= 2 && _many is null) panel.Children.Add(ShapeButtons(leaf));
+        if (leaf.Name == "TextBox" && _many is null) panel.Children.Add(FitTextButton());
         return panel;
     }
 
@@ -582,6 +583,28 @@ public partial class PropertyPanel : UserControl
         };
         bar.Children.Add(lockButton);
         return bar;
+    }
+
+    /// <summary>A Text's box to be made the size of its text as it shows.</summary>
+    public event EventHandler<HudBlock>? FitTextBoxRequested;
+
+    private Button FitTextButton()
+    {
+        var button = new Button
+        {
+            Style = ToolButton,
+            Content = new TextBlock { Text = "\uE9A6", Style = IconStyle, FontSize = 12 },
+            MinWidth = 24,
+            MinHeight = 22,
+            Padding = new Thickness(3),
+            Margin = new Thickness(0, 1, 2, 1),
+            ToolTip = "Fit the box to the text as it shows now: its lines as laid out, the text staying where it is",
+        };
+        button.Click += (_, _) =>
+        {
+            if (_block is not null) FitTextBoxRequested?.Invoke(this, _block);
+        };
+        return button;
     }
 
     /// <summary>A shape asked for that the panel cannot work out, with why.</summary>

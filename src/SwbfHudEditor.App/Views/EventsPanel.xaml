@@ -4,22 +4,22 @@
              Background="#252a30">
     <DockPanel>
         <StackPanel DockPanel.Dock="Top" Margin="6,6,6,4">
-            <CheckBox x:Name="SimulateBox" Content="Simulate the game's events" Foreground="#d4e8ff"
+            <CheckBox x:Name="SimulateBox" Content="Show and hide as the game does" Foreground="#d4e8ff"
                       Checked="SimulateBox_Changed" Unchecked="SimulateBox_Changed"
-                      ToolTip="Off: every element shows, as an editor wants. On: an element shows only once its EventEnable event has been sent after its EventDisable one, as in the game, and values, texts, colours, textures, models and positions follow the events sent." />
+                      ToolTip="Off: every element shows, but those you untick in the Elements tree, and the events you send set values, texts, colours, textures, models and positions straight away. On: an element shows only once its EventEnable event has been sent after its EventDisable one, and only while every group above it shows, as in the game." />
             <WrapPanel Margin="0,6,0,0">
                 <Button Content="Initialize" Click="Initialize_Click" Padding="8,1" Margin="0,0,4,4"
                         ToolTip="Send &quot;initialize&quot;, as the HUD does when it starts." />
                 <Button Content="On foot" Click="OnFoot_Click" Padding="8,1" Margin="0,0,4,4"
                         ToolTip="Send what the game would have by now for a soldier spawned on foot: initialize, spawn, weapons, full health and energy, ammo, the reticule, team reinforcements." />
                 <Button Content="Show selected" Click="ShowSelected_Click" Padding="8,1" Margin="0,0,4,4"
-                        ToolTip="Send the EventEnable events of the selected element and the groups above it." />
+                        ToolTip="Send the EventEnable events of the selected elements and the groups above them." />
                 <Button Content="Clear" Click="Clear_Click" Padding="8,1" Margin="0,0,4,4"
-                        ToolTip="Forget every event sent: everything starts hidden again." />
+                        ToolTip="Forget every event sent: every element is back in its load state, and, with the game's showing and hiding, hidden again." />
             </WrapPanel>
             <TextBox x:Name="FilterBox" Margin="0,2,0,0" TextChanged="FilterBox_TextChanged"
                      ToolTip="Show events whose name contains this." />
-            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest)." Foreground="#888"
+            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). What it sets shows at once; it shows or hides elements only with the box above ticked." Foreground="#888"
                        FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0" />
         </StackPanel>
         <ListView x:Name="EventList" Background="#1e2227" Foreground="#d4e8ff" BorderThickness="0"

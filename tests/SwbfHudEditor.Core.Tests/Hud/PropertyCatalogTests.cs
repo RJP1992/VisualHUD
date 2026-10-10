@@ -101,6 +101,65 @@ public class PropertyCatalogTests
     }
 
     [Fact]
+    public void A_Transform_Is_Offered_The_Keys_Its_Class_Reads()
+    {
+        var math = Offered(Parse("TransformNumberMath(\"m\") { Operation(\"Add\") EventInputA(\"x\") }"));
+        Assert.Contains("ConstantB", math);
+        Assert.Contains("EventInputB", math);
+        Assert.Contains("Clamp", math);
+        Assert.Contains("OutputIsAlpha", math);
+        Assert.DoesNotContain("ConstantA", math);      // EventInputA gives A already; both would switch it off
+        Assert.DoesNotContain("Operation", math);      // it has one
+        Assert.DoesNotContain("InputFactor", math);    // the native transforms' key
+        Assert.DoesNotContain("Position", math);       // not an element
+
+        var lerp = Offered(Parse("TransformNumberLerp(\"l\") { }"));
+        Assert.Contains("RiseTime", lerp);
+        Assert.Contains("InputRange", lerp);
+        Assert.DoesNotContain("Clamp", lerp);
+
+        var compare = Offered(Parse("TransformNumberCompare(\"c\") { }"));
+        Assert.Contains("Hysteresis", compare);
+        Assert.Contains("EventOutputTrue", compare);
+        Assert.Contains("Greater", PropertyCatalog.GetAddable(Parse("TransformNumberCompare(\"c\") { }")).Single(d => d.Name == "Operation").Description);
+
+        var color = Offered(Parse("TransformNumberColor(\"c\") { NumberColor(0, 255, 0, 0) EventInput(\"x\") }"));
+        Assert.Contains("NumberColor", color);         // another row of the table
+        Assert.Contains("InputFactor", color);
+        Assert.Contains("WrapInput", color);
+        Assert.DoesNotContain("EventInput", color);
+        Assert.DoesNotContain("NumberVector3", color);
+
+        var blend = Offered(Parse("TransformNumberColorBlend(\"b\") { }"));
+        Assert.Contains("EventBlend", blend);
+        Assert.Contains("NumberColor", blend);
+        Assert.DoesNotContain("InputFactor", blend);   // read, but its input handler never applies it
+
+        var mesh = Offered(Parse("TransformNameMesh(\"n\") { NameMesh(\"a\", \"b\") }"));
+        Assert.Contains("NameMesh", mesh);
+        Assert.Contains("TransformNameMesh", mesh);
+        Assert.DoesNotContain("WrapInput", mesh);
+    }
+
+    [Fact]
+    public void Map_Target_And_Seating_Can_Get_A_Missing_Template_Back()
+    {
+        var map = Offered(Parse("Map(\"m\") { BackdropSmall(\"BackdropSmall\") { } }"));
+        Assert.Contains("BackdropLarge", map);
+        Assert.Contains("NorthSpawn", map);
+        Assert.DoesNotContain("BackdropSmall", map);
+
+        var target = Offered(Parse("Target(\"t\") { }"));
+        Assert.Equal(24, target.Count(n => n.EndsWith("Screen") || n.EndsWith("ScreenBehind")));
+        Assert.Contains("HintFlagOffScreenBehind", target);
+
+        var seating = Offered(Parse("VehicleSeating(\"v\") { }"));
+        Assert.Contains("AIText", seating);
+        Assert.DoesNotContain("BackdropSmall", seating);
+        Assert.DoesNotContain("AIText", Offered(Parse("Group(\"g\") { }")));
+    }
+
+    [Fact]
     public void Added_Blocks_And_Lines_Are_What_The_Reader_Reads()
     {
         // Every starting value reads back as its key, without a parse error.

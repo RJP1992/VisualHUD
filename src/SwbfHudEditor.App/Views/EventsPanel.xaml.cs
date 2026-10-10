@@ -165,7 +165,7 @@ public partial class EventsPanel : UserControl
 
     private void OnFoot_Click(object sender, RoutedEventArgs e) => OnFootRequested?.Invoke(this, EventArgs.Empty);
 
-    /// <summary>Turn simulation on, as sending a whole scenario implies.</summary>
+    /// <summary>Show and hide as the game does, as sending a whole scenario implies.</summary>
     public void StartSimulating() => SimulateBox.IsChecked = true;
 
     private void ShowSelected_Click(object sender, RoutedEventArgs e) => ShowSelectedRequested?.Invoke(this, EventArgs.Empty);

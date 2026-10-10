@@ -23,6 +23,10 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#d4e8ff" />
             <Style.Triggers>
+                <!-- One of several rows picked with Ctrl or Shift. -->
+                <DataTrigger Binding="{Binding IsMultiSelected}" Value="True">
+                    <Setter Property="Background" Value="#264f78" />
+                </DataTrigger>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="#3a4552" />
                 </Trigger>
@@ -34,7 +38,7 @@
         <HierarchicalDataTemplate DataType="{x:Type local:HudFile}" ItemsSource="{Binding Document.TopLevel, Converter={StaticResource ElementsOnly}}">
             <StackPanel Orientation="Horizontal" ToolTip="{Binding FilePath}">
                 <CheckBox IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,4,0" VerticalAlignment="Center"
-                          ToolTip="Show/hide this file's elements on the canvas"
+                          ToolTip="Show/hide this file's elements on the canvas; on a selected row, every selected row. Ctrl+click shows only this file."
                           Click="VisibilityCheckBox_Click" />
                 <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#ffd479" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding Note}" Foreground="#8a8f96" FontStyle="Italic" Margin="8,0,0,0" VerticalAlignment="Center" />
@@ -42,14 +46,18 @@
         </HierarchicalDataTemplate>
         <!-- A block of the file, in file order, with the elements it holds nested under it (its
              property lines are in the Properties panel): the per-element visibility toggle and
-             the block as written. -->
+             the block as written. F2 swaps the line for a box to rename it in. -->
         <HierarchicalDataTemplate DataType="{x:Type hud:HudBlock}" ItemsSource="{Binding Children, Converter={StaticResource ElementsOnly}}">
             <StackPanel Orientation="Horizontal">
                 <CheckBox IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,4,0" VerticalAlignment="Center"
-                          ToolTip="Show/hide this element (and its descendants) on the canvas"
+                          ToolTip="Show/hide this element (and its descendants) on the canvas; on a selected row, every selected row. Ctrl+click shows only this element."
                           Click="VisibilityCheckBox_Click" />
-                <TextBlock Text="{Binding}" FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
+                <TextBlock x:Name="HeaderLabel" Text="{Binding Header}" FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
                            Foreground="#7fc3ff" VerticalAlignment="Center" />
+                <TextBox x:Name="RenameBox" Visibility="Collapsed" MinWidth="160" Padding="2,0"
+                         FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
+                         Background="#1b2027" Foreground="#ffffff" BorderBrush="#7fc3ff" CaretBrush="#ffffff"
+                         KeyDown="RenameBox_KeyDown" LostKeyboardFocus="RenameBox_LostKeyboardFocus" />
             </StackPanel>
         </HierarchicalDataTemplate>
     </Window.Resources>
@@ -79,18 +87,16 @@
                 <Separator />
                 <MenuItem Header="E_xit" Click="Exit_Click" />
             </MenuItem>
-            <MenuItem Header="_Edit">
+            <MenuItem Header="_Edit" SubmenuOpened="EditMenu_SubmenuOpened">
                 <MenuItem Header="_Undo" Command="{x:Static ApplicationCommands.Undo}" InputGestureText="Ctrl+Z" />
                 <MenuItem Header="_Redo" Command="{x:Static ApplicationCommands.Redo}" InputGestureText="Ctrl+Y" />
                 <Separator />
+                <MenuItem x:Name="EditInsertInside" Header="_Insert inside" ToolTipService.ShowOnDisabled="True" />
+                <MenuItem x:Name="EditInsertAfter" Header="Insert _after" ToolTipService.ShowOnDisabled="True" />
+                <Separator />
+                <MenuItem x:Name="EditRename" Header="Re_name" Click="Rename_Click" InputGestureText="F2"
+                          ToolTipService.ShowOnDisabled="True" />
                 <MenuItem Header="_Delete selected" Click="DeleteSelected_Click" InputGestureText="Del" />
-                <MenuItem Header="Insert _top-level element">
-                    <MenuItem Header="Group" Click="InsertTopLevel_Group_Click" />
-                    <MenuItem Header="Bitmap" Click="InsertTopLevel_Bitmap_Click" />
-                    <MenuItem Header="BarBitmap" Click="InsertTopLevel_BarBitmap_Click" />
-                    <MenuItem Header="Text" Click="InsertTopLevel_Text_Click" />
-                    <MenuItem Header="Model3D" Click="InsertTopLevel_Model3D_Click" />
-                </MenuItem>
             </MenuItem>
         </Menu>
         <StatusBar DockPanel.Dock="Bottom">
@@ -115,18 +121,26 @@
                 <TabItem Header="Elements">
                 <TreeView x:Name="Tree" SelectedItemChanged="Tree_SelectedItemChanged"
                           PreviewMouseLeftButtonDown="Tree_PreviewMouseLeftButtonDown"
+                          PreviewMouseRightButtonDown="Tree_PreviewMouseRightButtonDown"
                           Background="#252a30" Foreground="#d4e8ff" BorderThickness="0">
                     <TreeView.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="Insert child">
-                                <MenuItem Header="Group" Click="InsertChild_Group_Click" />
-                                <MenuItem Header="Bitmap" Click="InsertChild_Bitmap_Click" />
-                                <MenuItem Header="BarBitmap" Click="InsertChild_BarBitmap_Click" />
-                                <MenuItem Header="Text" Click="InsertChild_Text_Click" />
-                                <MenuItem Header="Model3D" Click="InsertChild_Model3D_Click" />
-                            </MenuItem>
+                        <ContextMenu Opened="TreeMenu_Opened">
+                            <MenuItem x:Name="TreeInsertInside" Header="Insert inside" ToolTipService.ShowOnDisabled="True" />
+                            <MenuItem x:Name="TreeInsertAfter" Header="Insert after" ToolTipService.ShowOnDisabled="True" />
                             <Separator />
+                            <MenuItem x:Name="TreeRename" Header="Rename" Click="Rename_Click" InputGestureText="F2"
+                                      ToolTipService.ShowOnDisabled="True" />
                             <MenuItem Header="Delete" Click="DeleteSelected_Click" InputGestureText="Del" />
+                            <Separator />
+                            <!-- On the canvas only: what is hidden here is still in the file. -->
+                            <MenuItem Header="Show and hide">
+                                <MenuItem x:Name="TreeToggleHide" Header="Hide" Click="ToggleHide_Click" InputGestureText="H" />
+                                <MenuItem Header="Show only this" Click="ShowOnly_Click" InputGestureText="Shift+H"
+                                          ToolTip="Hide everything else: the other files, and in this file all but this, what holds it and what it holds." />
+                                <MenuItem Header="Show everything in this" Click="ShowInside_Click"
+                                          ToolTip="Show this, what holds it and all it holds." />
+                                <MenuItem Header="Show all" Click="ShowAll_Click" InputGestureText="Alt+H" />
+                            </MenuItem>
                         </ContextMenu>
                     </TreeView.ContextMenu>
                 </TreeView>
@@ -150,7 +164,8 @@
             <views:PropertyPanel x:Name="Properties" Grid.Column="4"
                                  PropertyEdited="Properties_PropertyEdited"
                                  PropertyInsertRequested="Properties_PropertyInsertRequested"
-                                 PropertyDeleteRequested="Properties_PropertyDeleteRequested" />
+                                 PropertyDeleteRequested="Properties_PropertyDeleteRequested"
+                                 RenameRequested="Properties_RenameRequested" />
         </Grid>
     </DockPanel>
     <Window.InputBindings>
@@ -161,8 +176,10 @@
         <KeyBinding Modifiers="Control" Key="Y" Command="{x:Static ApplicationCommands.Redo}" />
         <KeyBinding Modifiers="Control+Shift" Key="Z" Command="{x:Static ApplicationCommands.Redo}" />
         <KeyBinding Key="F5" Command="{x:Static NavigationCommands.Refresh}" />
+        <KeyBinding Key="F2" Command="{x:Static local:MainWindow.RenameCommand}" />
         <KeyBinding Key="H" Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" />
         <KeyBinding Modifiers="Alt" Key="H" Command="{x:Static local:MainWindow.UnhideAllCommand}" />
+        <KeyBinding Modifiers="Shift" Key="H" Command="{x:Static local:MainWindow.ShowOnlySelectedCommand}" />
     </Window.InputBindings>
     <Window.CommandBindings>
         <CommandBinding Command="{x:Static ApplicationCommands.Open}" Executed="Open_Executed" />
@@ -173,5 +190,7 @@
         <CommandBinding Command="{x:Static NavigationCommands.Refresh}" Executed="Reload_Executed" CanExecute="Reload_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" Executed="ToggleHideSelected_Executed" CanExecute="HideCommand_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.UnhideAllCommand}" Executed="UnhideAll_Executed" CanExecute="HideCommand_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.RenameCommand}" Executed="Rename_Executed" />
+        <CommandBinding Command="{x:Static local:MainWindow.ShowOnlySelectedCommand}" Executed="ShowOnly_Executed" CanExecute="HideCommand_CanExecute" />
     </Window.CommandBindings>
 </Window>

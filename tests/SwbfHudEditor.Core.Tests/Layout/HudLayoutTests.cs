@@ -1,4 +1,5 @@
 using System.Numerics;
+using SwbfHudEditor.Core.Events;
 using SwbfHudEditor.Core.Hud;
 using SwbfHudEditor.Core.Layout;
 
@@ -287,6 +288,109 @@ public class HudLayoutTests
         Assert.Equal(new Vector3(1, 0, 0), b.DrawColor);
         Assert.Equal(0.25f, b.DrawAlpha);
         Assert.Equal(0.5f, Named(r, "c").DrawAlpha);   // h does not propagate
+    }
+
+    [Theory]
+    [InlineData(HudTarget.Vanilla, "")]
+    [InlineData(HudTarget.GameExt, "FileInfo(\"f\") { AuthoredRatio(16, 9) }")]
+    public void Before_Events_Groups_On_One_Position_Event_Share_The_First_Ones_Point(HudTarget target, string fileInfo)
+    {
+        // The game sends every group on the event the same point, so before any event the editor puts
+        // them all where the first one is written.
+        var r = Lay(fileInfo + """
+            Group("bar") { EventPosition("player1.weapon1.target.position") Position(0.5, 0.5, 0, "Viewport") }
+            Group("names") { EventPosition("player1.weapon1.target.position") Position(0.5, 0.425, 0, "Viewport") }
+            Group("box") { EventPosition("player1.weapon1.target.position") Position(0.1, 0.1, 0, "Viewport") Rect(64, 32, "Center", "Center", "Pixels") }
+            Group("other") { Position(0.25, 0.25, 0, "Viewport") }
+            """, target);
+        var point = Origin(Named(r, "bar"));
+        Assert.True(Vector2.Distance(point, Origin(Named(r, "names"))) < 0.01f);
+        // A Pixels Rect reads the point as pixels, as it would read a sent screen fraction: 0.5 px, then its anchor.
+        Assert.False(Vector2.Distance(point, Origin(Named(r, "box"))) < 1f);
+        // A group on no event stays where it is written.
+        var other = Origin(Named(r, "other"));
+        Assert.True(MathF.Abs(other.X - 320f) < 0.5f, $"other at {other}");
+    }
+
+    /// <summary>The events sent, laid out with or without the game's showing and hiding.</summary>
+    private static HudLayoutResult LaySent(HudDocument doc, HudEventState state, bool showByEvents, HudTarget target = HudTarget.Vanilla) =>
+        HudLayout.Lay(doc, new LayoutOptions
+        {
+            Screen = Hd,
+            Target = target,
+            Simulation = HudSimulation.Run(doc, HudTransformGraph.From(new[] { doc }), state),
+            ShowByEvents = showByEvents,
+        });
+
+    [Fact]
+    public void Without_The_Games_Showing_And_Hiding_Every_Element_Shows_And_Takes_What_Is_Sent()
+    {
+        var doc = HudParser.Parse("""
+            Group("g")
+            {
+                EventEnable("player1.spawn")
+                BarBitmap("bar")
+                {
+                    EventValue("player1.healthFraction")
+                    EventEnable("player1.weaponsEnable")
+                    BitmapRect(100, 10, "Left", "Top", "Pixels")
+                }
+                Text("label")
+                {
+                    EventNumber("player1.weapon1.totalAmmoBullets")
+                    EventEnable("player1.weapon1.totalAmmoBullets")
+                }
+            }
+            """);
+        var state = new HudEventState();
+        state.Send("player1.healthFraction", HudEventValue.FromFloat(0.25f));
+
+        // As the game: the group was never enabled, so nothing shows.
+        Assert.All(LaySent(doc, state, showByEvents: true).All, e => Assert.False(e.Shown));
+
+        var r = LaySent(doc, state, showByEvents: false);
+        Assert.All(r.All, e => Assert.True(e.Shown));
+        Assert.Equal(0.25f, Named(r, "bar").BarFraction, 3);
+        Assert.Null(Named(r, "label").Text);   // nothing sent to it yet: the canvas shows its example
+    }
+
+    [Fact]
+    public void Without_The_Games_Showing_And_Hiding_A_Sent_Position_Moves_Its_Groups_And_The_Rest_Stay_Shared()
+    {
+        var doc = HudParser.Parse("""
+            Group("a") { EventPosition("player1.example.marker") Position(0.5, 0.5, 0, "Viewport") }
+            Group("b") { EventPosition("player1.example.marker") Position(0.2, 0.3, 0, "Viewport") }
+            Group("c") { EventPosition("player1.example.other") Position(0.1, 0.1, 0, "Viewport") }
+            Group("d") { EventPosition("player1.example.other") Position(0.9, 0.9, 0, "Viewport") }
+            """);
+        var state = new HudEventState();
+        var before = LaySent(doc, state, showByEvents: false);
+        state.Send("player1.example.marker", HudEventValue.FromVector(new Vector3(0.25f, 0.75f, 0f)));
+        var r = LaySent(doc, state, showByEvents: false);
+
+        // Both groups on the sent event are at the sent point, away from where the first was written.
+        Assert.True(Vector2.Distance(Origin(Named(r, "a")), Origin(Named(r, "b"))) < 0.01f);
+        Assert.True(Vector2.Distance(Origin(Named(r, "a")), Origin(Named(before, "a"))) > 50f);
+        Assert.True(MathF.Abs(Origin(Named(r, "a")).X - 0.25f * 1280f) < 1f, $"a at {Origin(Named(r, "a"))}");
+        // The groups on the other event still share the first one's written point, as before any event.
+        Assert.True(Vector2.Distance(Origin(Named(r, "c")), Origin(Named(r, "d"))) < 0.01f);
+        Assert.True(Vector2.Distance(Origin(Named(r, "c")), Origin(Named(before, "c"))) < 0.01f);
+
+        // As the game, a group whose event has not come is where it is written.
+        var game = LaySent(doc, state, showByEvents: true);
+        Assert.False(Vector2.Distance(Origin(Named(game, "c")), Origin(Named(game, "d"))) < 1f);
+    }
+
+    [Fact]
+    public void A_Centred_Rect_Hangs_From_The_Shared_Point()
+    {
+        var r = Lay("""
+            FileInfo("f") { AuthoredRatio(16, 9) }
+            Group("bar") { EventPosition("player1.weapon1.target.position") Position(0.5, 0.5, 0, "Viewport") }
+            Group("marker") { EventPosition("player1.weapon1.target.position") Position(0.2, 0.2, 0, "Viewport") Rect(0.1, 0.1, "Center", "Center", "Viewport") }
+            """, HudTarget.GameExt);
+        // The box's top-left, where the marker's children start, is half the box up and left of the point.
+        Assert.Equal(new Vector2(640f - 64f, 360f - 36f), Origin(Named(r, "marker")));
     }
 
     [Fact]

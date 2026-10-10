@@ -30,6 +30,25 @@ public sealed class HudBlock : INotifyPropertyChanged
         }
     }
 
+    private bool _isMultiSelected;
+    /// <summary>Editor-only: one of several rows selected together in the Elements tree. Not serialized.</summary>
+    public bool IsMultiSelected
+    {
+        get => _isMultiSelected;
+        set
+        {
+            if (_isMultiSelected == value) return;
+            _isMultiSelected = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>The block's line as the Elements tree shows it, <c>Name("text", 1) { ... }</c>.</summary>
+    public string Header => ToString();
+
+    /// <summary>Tell bindings an argument changed, such as a rename: <see cref="Arguments"/> is a plain list.</summary>
+    public void NotifyArgumentsChanged() => OnPropertyChanged(nameof(Header));
+
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

@@ -47,9 +47,16 @@ public sealed record LayoutOptions
 
     /// <summary>
     /// The events sent and what they did to each element. Null shows every element enabled, in its
-    /// load state, as an editor wants; with one, an element shows only once its events have enabled it.
+    /// load state, as an editor wants; with one, the events set values, texts, colours, models and
+    /// moves, and with <see cref="ShowByEvents"/> also what shows.
     /// </summary>
     public Events.HudSimulation? Simulation { get; init; }
+
+    /// <summary>
+    /// With a <see cref="Simulation"/>: an element shows only once its events have enabled it, as in the
+    /// game. False: every element shows, as without one, and the events only set what they set.
+    /// </summary>
+    public bool ShowByEvents { get; init; } = true;
 
     public bool RoundsToUnits => Rounding ?? Target == HudTarget.Vanilla;
 }

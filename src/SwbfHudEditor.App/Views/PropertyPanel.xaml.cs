@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using SwbfHudEditor.Core.Edits;
 using SwbfHudEditor.Core.Hud;
 
 namespace SwbfHudEditor.App.Views;
@@ -11,11 +12,15 @@ public sealed record PropertyEditedEventArgs(HudBlock Leaf, int ArgIndex, HudArg
 
 /// <summary>Fired when the user clicks an "Add" tab button to insert a property as a child of
 /// <see cref="Target"/>. Carries the already-built leaf <see cref="Property"/> so the host can
-/// wrap the insert in an undo edit and add it at the correct position.</summary>
-public sealed record PropertyInsertRequestedEventArgs(HudBlock Target, HudBlock Property);
+/// wrap the insert in an undo edit and add it at the correct position. <see cref="CopiedLast"/>: a
+/// table row copied from the block's last row of that name.</summary>
+public sealed record PropertyInsertRequestedEventArgs(HudBlock Target, HudBlock Property, bool CopiedLast = false);
 
 /// <summary>Fired by a row's delete button: remove <see cref="Property"/> from <see cref="Target"/>.</summary>
 public sealed record PropertyDeleteRequestedEventArgs(HudBlock Target, HudBlock Property);
+
+/// <summary>Fired by the name box in the header: rename <see cref="Block"/> to <see cref="NewName"/>.</summary>
+public sealed record RenameRequestedEventArgs(HudBlock Block, string NewName);
 
 public partial class PropertyPanel : UserControl
 {
@@ -34,6 +39,7 @@ public partial class PropertyPanel : UserControl
     public event EventHandler<PropertyEditedEventArgs>? PropertyEdited;
     public event EventHandler<PropertyInsertRequestedEventArgs>? PropertyInsertRequested;
     public event EventHandler<PropertyDeleteRequestedEventArgs>? PropertyDeleteRequested;
+    public event EventHandler<RenameRequestedEventArgs>? RenameRequested;
 
     public PropertyPanel()
     {
@@ -42,8 +48,57 @@ public partial class PropertyPanel : UserControl
 
     public void SetBlock(HudBlock? block)
     {
+        // A name typed and not yet committed belongs to the block shown so far: selecting another
+        // element in the tree switches the panel before the box loses focus.
+        if (NameBox.IsKeyboardFocusWithin && !ReferenceEquals(block, _block)) CommitName();
         _block = block;
         Rebuild();
+    }
+
+    /// <summary>Show the block's name again, after a rename elsewhere or one that was refused.</summary>
+    public void RefreshHeader()
+    {
+        if (_block is null) return;
+        var name = HudRename.NameOf(_block);
+        NameRow.Visibility = name is null ? Visibility.Collapsed : Visibility.Visible;
+        HeaderText.Visibility = name is null ? Visibility.Visible : Visibility.Collapsed;
+        HeaderText.Text = _block.ToString();
+        if (name is null) return;
+        KindText.Text = _block.Name;
+        NameBox.Text = name;
+        var refusal = HudRename.WhyNot(_block, ParentOf?.Invoke(_block));
+        NameBox.IsReadOnly = refusal is not null;
+        NameBox.ToolTip = refusal ?? "The block's name. Enter renames it, and the lines that name it; Esc puts it back.";
+    }
+
+    /// <summary>Put the caret in the name box, its name selected.</summary>
+    public void FocusName()
+    {
+        if (NameRow.Visibility != Visibility.Visible || NameBox.IsReadOnly) return;
+        NameBox.Focus();
+        NameBox.SelectAll();
+    }
+
+    private void NameBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            CommitName();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            RefreshHeader();
+            e.Handled = true;
+        }
+    }
+
+    private void NameBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => CommitName();
+
+    private void CommitName()
+    {
+        if (_block is null || NameBox.IsReadOnly || HudRename.NameOf(_block) is not { } name || NameBox.Text == name) return;
+        RenameRequested?.Invoke(this, new RenameRequestedEventArgs(_block, NameBox.Text));
     }
 
     /// <summary>Mark again the rows whose line restates a default, after an edit.</summary>
@@ -67,12 +122,14 @@ public partial class PropertyPanel : UserControl
         _nameLabels.Clear();
         if (_block is null)
         {
+            NameRow.Visibility = Visibility.Collapsed;
+            HeaderText.Visibility = Visibility.Visible;
             HeaderText.Text = "(no selection)";
             AddRows.Children.Add(HintText("Select an element in the tree or canvas to see its properties."));
             return;
         }
 
-        HeaderText.Text = _block.ToString();
+        RefreshHeader();
 
         RebuildEditTab();
         RebuildAddTab();
@@ -208,7 +265,12 @@ public partial class PropertyPanel : UserControl
         // Build a fresh instance every click — the factory returns a new HudBlock so repeated
         // Add-then-Undo-then-Add cycles don't reuse the same object (which would confuse undo).
         var newProp = def.Factory();
-        PropertyInsertRequested?.Invoke(this, new PropertyInsertRequestedEventArgs(_block, newProp));
+        // Another row of a table, such as NumberColor, starts as a copy of the table's last row.
+        var last = def.Repeatable && !def.IsBlock
+            ? _block.Children.LastOrDefault(c => !c.HasBody && c.Name.Equals(def.Name, StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (last is not null) newProp = new HudBlock(last.Name, last.Arguments.ToArray());
+        PropertyInsertRequested?.Invoke(this, new PropertyInsertRequestedEventArgs(_block, newProp, CopiedLast: last is not null));
     }
 
     private static TextBlock HintText(string text) => new()

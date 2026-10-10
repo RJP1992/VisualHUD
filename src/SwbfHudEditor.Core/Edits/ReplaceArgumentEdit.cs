@@ -23,6 +23,15 @@ public sealed class ReplaceArgumentEdit : IHudEdit
     public HudBlock? AffectedBlock => _affected;
     public string Description => $"edit {_block.Name} arg {_index}";
 
-    public void Apply() => _block.Arguments[_index] = _newArg;
-    public void Revert() => _block.Arguments[_index] = _oldArg;
+    public void Apply()
+    {
+        _block.Arguments[_index] = _newArg;
+        _block.NotifyArgumentsChanged();
+    }
+
+    public void Revert()
+    {
+        _block.Arguments[_index] = _oldArg;
+        _block.NotifyArgumentsChanged();
+    }
 }

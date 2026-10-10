@@ -38,6 +38,7 @@ public static class HudLayout
     public static HudLayoutResult Lay(IReadOnlyList<HudDocument> docs, LayoutOptions options)
     {
         var byBlock = new Dictionary<HudBlock, LaidOutElement>(ReferenceEqualityComparer.Instance);
+        var sharedPositions = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
         var files = new List<(HudDocument Document, HudFileLayout Layout)>();
         var roots = new List<LaidOutElement>();
         var round = options.RoundsToUnits;
@@ -48,7 +49,7 @@ public static class HudLayout
         {
             var file = HudFileLayout.For(doc, options);
             files.Add((doc, file));
-            var ctx = new Context(options, file, doc, byBlock);
+            var ctx = new Context(options, file, doc, byBlock, sharedPositions);
 
             var docRoots = new List<LaidOutElement>();
             foreach (var top in TopLevelElements(doc))
@@ -67,7 +68,8 @@ public static class HudLayout
         }
 
         var next = 0;
-        foreach (var e in DrawOrder(TopLevelInsertionOrder(roots, options.Simulation), topLevel: true)) e.DrawIndex = next++;
+        foreach (var e in DrawOrder(TopLevelInsertionOrder(roots, options.ShowByEvents ? options.Simulation : null), topLevel: true))
+            e.DrawIndex = next++;
 
         return new HudLayoutResult
         {
@@ -80,9 +82,18 @@ public static class HudLayout
     }
 
     private sealed class Context(LayoutOptions options, HudFileLayout file, HudDocument document,
-        Dictionary<HudBlock, LaidOutElement> byBlock)
+        Dictionary<HudBlock, LaidOutElement> byBlock, Dictionary<string, Vector3> sharedPositions)
     {
         public LayoutOptions Options { get; } = options;
+
+        /// <summary>The events decide what shows, as in the game.</summary>
+        public bool ShowsByEvents => Options.Simulation is not null && Options.ShowByEvents;
+
+        /// <summary>
+        /// Before events are simulated: the point each position event is taken to have sent, the
+        /// written position of the first group bound to it, as a share of its view.
+        /// </summary>
+        public Dictionary<string, Vector3> SharedPositions { get; } = sharedPositions;
         public HudFileLayout File { get; } = file;
         public HudDocument Document { get; } = document;
         public HudScreen Screen => Options.Screen;
@@ -128,7 +139,7 @@ public static class HudLayout
         e.InActiveViewport = e.Viewport == 0 || e.Viewport == ctx.Options.ActiveViewport;
         var runtime = ctx.Options.Simulation?.For(block);
         e.Runtime = runtime;
-        e.Enabled = ctx.Options.Simulation is null || runtime is { Enabled: true };
+        e.Enabled = !ctx.ShowsByEvents || runtime is { Enabled: true };
         e.Shown = e.Enabled && (parent?.Shown ?? true);
         e.Texture = runtime?.Texture ?? spec.Texture;
         e.Text = runtime?.Text;
@@ -188,6 +199,10 @@ public static class HudLayout
 
         e.Local = local;
         e.LoadLocal = local;
+
+        // A group whose EventPosition has not been sent, where the first group on that event was written.
+        if (SharedMove(ctx, e, translation) is { } shared && !(ctx.File.Opted && IsTracked(shared.Event)))
+            e.Local = ApplyMove(e, e.Local, shared, shared.Value);
 
         // Events that moved a group since: EventPosition, EventScale and EventRotation, in the order sent.
         if (runtime is not null)
@@ -288,9 +303,11 @@ public static class HudLayout
 
     private static void ApplyTrackedMoves(Context ctx, LaidOutElement e)
     {
-        if (ctx.File.Opted && e.Runtime is { } runtime)
+        if (ctx.File.Opted)
         {
-            foreach (var move in runtime.Moves)
+            var moves = SharedMove(ctx, e, null) is { } shared ? new[] { shared }
+                : e.Runtime?.Moves ?? Array.Empty<Events.GroupMove>();
+            foreach (var move in moves)
             {
                 if (move.Kind != Events.GroupMoveKind.Position || !IsTracked(move.Event)) continue;
                 var slide = 0f;
@@ -301,6 +318,27 @@ public static class HudLayout
             }
         }
         foreach (var child in e.Children) ApplyTrackedMoves(ctx, child);
+    }
+
+    /// <summary>
+    /// Until its event is sent, a group bound to an <c>EventPosition</c> is shown as if that event had
+    /// sent the written position of the first group bound to it: the game sends every group on the
+    /// event the same point, so groups that follow a target together stay together. The first group's
+    /// <paramref name="translation"/> (its position in pixels) sets the point; null only looks it up.
+    /// Not while the events decide what shows: then a group the event has not reached is where it was
+    /// written, as in the game.
+    /// </summary>
+    private static Events.GroupMove? SharedMove(Context ctx, LaidOutElement e, Vector3? translation)
+    {
+        if (ctx.ShowsByEvents || e.Spec.EventPosition is not { } name || !ElementKinds.IsGroupBased(e.Kind) ||
+            e.Runtime?.Moves.Any(m => m.Kind == Events.GroupMoveKind.Position) == true)
+            return null;
+        if (!ctx.SharedPositions.TryGetValue(name, out var value))
+        {
+            if (translation is not { } t || e.ViewWidth <= 0f || e.ViewHeight <= 0f) return null;
+            ctx.SharedPositions[name] = value = new Vector3(t.X / e.ViewWidth, t.Y / e.ViewHeight, t.Z);
+        }
+        return new Events.GroupMove(Events.GroupMoveKind.Position, value, name, 0);
     }
 
     private static LaidOutElement? NearestGroup(LaidOutElement? e)

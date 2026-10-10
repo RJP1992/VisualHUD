@@ -17,8 +17,11 @@ public static class PropertyCatalog
         /// <summary>A sub-scope (a block with a body) rather than a line.</summary>
         public bool IsBlock { get; init; }
 
-        /// <summary>Whether a block may hold more than one, as <c>MeshInfo</c>.</summary>
+        /// <summary>Whether a block may hold more than one, as <c>MeshInfo</c> or a transform's table rows.</summary>
         public bool Repeatable { get; init; }
+
+        /// <summary>Lines that take its place, so a block with one of them is not offered it: <c>ConstantA</c> or <c>EventInputA</c>.</summary>
+        public IReadOnlyList<string> Excludes { get; init; } = Array.Empty<string>();
 
         internal string Reader { get; init; } = "Element";
     }
@@ -27,7 +30,7 @@ public static class PropertyCatalog
     public static readonly IReadOnlyList<string> Groups = new[]
     {
         "Placement", "Look", "Show and hide", "Events", "Text", "Bitmap", "Bar", "Model", "Box and list", "Map",
-        "Target", "File", "GameExt", "Editor",
+        "Target", "Transform", "File", "GameExt", "Editor",
     };
 
     private static readonly List<PropertyDef> All = new();
@@ -277,6 +280,96 @@ public static class PropertyCatalog
         Add("CodeTemplate", "Text", "TextAlignment", "(h, v) of a text template.", () => Leaf("TextAlignment", S("Center"), S("Center")));
         Add("CodeTemplate", "Text", "TextStyle", "\"Shadow\", \"Normal\" or \"Selected\".", () => Leaf("TextStyle", S("Shadow")));
 
+        // ---- The templates of Map, Target and VehicleSeating, which their readers find by keyword ----
+        foreach (var (mode, view) in new[] { ("Small", "minimap"), ("Large", "full map"), ("Spawn", "spawn screen's map") })
+            foreach (var (part, what) in new[]
+                     {
+                         ("Backdrop", "The map picture, cut by its Mask"), ("PlayerFOV", "The player's view cone, a model"),
+                         ("PlayerDirection", "The player's facing, a model"), ("Target", "The template for targets"),
+                         ("Post", "The template for command posts"), ("PostText", "The template for command post names"),
+                         ("PostSelect", "The template for the chosen post"), ("Marker", "The template for markers"),
+                         ("North", "The north pointer"),
+                     })
+                Add("Map", "Map", part + mode, $"{what} on the {view}.", () => Block(part + mode, part + mode), isBlock: true);
+        foreach (var (who, what) in new[]
+                 {
+                     ("Objective", "an objective"), ("Flag", "a flag"), ("Attacker", "an attacker"), ("Locked", "a locked target"),
+                     ("Hint", "a hint"), ("HintFlag", "a hint at a flag"),
+                 })
+            foreach (var (where, place) in new[] { ("OnScreen", "in view"), ("OffScreen", "off the screen, at its edge") })
+                foreach (var (behind, hidden) in new[] { ("", ""), ("Behind", ", hidden behind something") })
+                    Add("Target", "Target", who + where + behind, $"The marker for {what} {place}{hidden}.",
+                        () => Block(who + where + behind, who + where + behind), isBlock: true);
+        foreach (var (part, what) in new[]
+                 {
+                     ("Backdrop", "Drawn behind the chart"), ("Empty", "An empty seat's icon, a model"), ("EmptyText", "An empty seat's label"),
+                     ("Self", "The player's own seat's icon"), ("SelfText", "The player's own seat's label"),
+                     ("Player", "Another player's seat's icon"), ("PlayerText", "Another player's seat's label"),
+                     ("AI", "An AI's seat's icon"), ("AIText", "An AI's seat's label"),
+                 })
+            Add("Seating", "Box and list", part, $"VehicleSeating: {what}.", () => Block(part, part), isBlock: true);
+
+        // ---- Transforms (BF2GameExt docs/RE/HUDAuthoring.md, "Transforms") ----
+        // The native ones share TransformNumberType's reader: EventInput, EventOutput, InputFactor,
+        // EventInputFactor, WrapInput. ColorBlend parses the factors but its input handler never applies them.
+        Add("TransformIO", "Transform", "EventInput", "The event the transform reads: a number, or for TransformNameMesh a weapon's name hash.",
+            () => Leaf("EventInput", S("player1.healthFraction")));
+        Add("TransformIO", "Transform", "EventOutput", "The event it sends, for an element to bind: a new name.",
+            () => Leaf("EventOutput", S("player1.example.output")));
+        Add("TransformFactor", "Transform", "InputFactor", "A constant the input is multiplied by before the lookup; 1 by default.",
+            () => Leaf("InputFactor", F(1)));
+        Add("TransformFactor", "Transform", "EventInputFactor", "A number event the input is multiplied by too; it waits for the next input to publish.",
+            () => Leaf("EventInputFactor", S("player1.example.factor")));
+        Add("TransformWrap", "Transform", "WrapInput", "1: an input past the table's last key wraps round to its first; 0, the default, holds the end.",
+            () => Leaf("WrapInput", I(1)));
+        Add("TransformColor", "Transform", "NumberColor", "(key, r, g, b): a row of the table, keys rising; inputs between two rows blend their colours.",
+            () => Leaf("NumberColor", F(1), I(255), I(255), I(255)), repeatable: true);
+        Add("TransformVector3", "Transform", "NumberVector3", "(key, x, y, z): a row of the table, keys rising; inputs between two rows blend their values.",
+            () => Leaf("NumberVector3", F(1), F(1), F(1), F(1)), repeatable: true);
+        Add("TransformColorBlend", "Transform", "EventBlend", "The Color event the mapped colour blends with; declare the transform sending it first.",
+            () => Leaf("EventBlend", S("player1.healthColor")));
+        Add("TransformColorBlend", "Transform", "BlendMode", "\"Alpha\", the default, mixes the two colours; \"Additive\" adds the mapped one.",
+            () => Leaf("BlendMode", S("Additive")));
+        Add("TransformColorBlend", "Transform", "Alpha", "The blend weight, 0 to 1; about 0.5 by default.",
+            () => Leaf("Alpha", F(0.5)));
+        Add("TransformColorBlend", "Transform", "EventAlpha", "A number event setting the blend weight: a Float 0 to 1, or an Int 0 to 255.",
+            () => Leaf("EventAlpha", S("player1.example.weight")));
+        Add("TransformNameMesh", "Transform", "NameMesh", "(\"weapon\", \"model\"): a weapon, by name, and the model it shows. Up to 256 rows.",
+            () => Leaf("NameMesh", S("all_weap_inf_rifle"), S("hud_all_rifle")), repeatable: true);
+        Add("TransformNameMesh", "Transform", "TransformNameMesh", "Copies the rows of a TransformNameMesh declared before this one, by its name.",
+            () => Leaf("TransformNameMesh", S("player1weapon1")), repeatable: true);
+
+        // GameExt's Math, Lerp and Compare: A and B are each a constant or an event, never both.
+        Add("Math", "Transform", "Operation", "GameExt: \"Add\", \"Subtract\", \"Multiply\", \"Divide\", \"Min\" or \"Max\", of A and B.",
+            () => Leaf("Operation", S("Multiply")));
+        Add("Compare", "Transform", "Operation", "GameExt: \"Greater\", \"GreaterOrEqual\", \"Less\", \"LessOrEqual\", \"Equal\" or \"NotEqual\": A against B.",
+            () => Leaf("Operation", S("Less")));
+        Add("Lerp", "Transform", "EventInput", "GameExt: the number event that moves the output from A to B, placed in InputRange.",
+            () => Leaf("EventInput", S("player1.healthFraction")));
+        Add("Lerp", "Transform", "InputRange", "GameExt: (min, max), each a number or an event: the inputs that give A and B; 0 to 1 by default.",
+            () => Leaf("InputRange", F(0), F(1)));
+        Add("Operands", "Transform", "ConstantA", "GameExt: A as a number.", () => Leaf("ConstantA", F(0)), excludes: "EventInputA");
+        Add("Operands", "Transform", "EventInputA", "GameExt: A as the latest value of a number event.",
+            () => Leaf("EventInputA", S("player1.healthFraction")), excludes: "ConstantA");
+        Add("Operands", "Transform", "ConstantB", "GameExt: B as a number.", () => Leaf("ConstantB", F(1)), excludes: "EventInputB");
+        Add("Operands", "Transform", "EventInputB", "GameExt: B as the latest value of a number event.",
+            () => Leaf("EventInputB", S("player1.maxHealth")), excludes: "ConstantB");
+        Add("Math", "Transform", "Clamp", "GameExt: (min, max) the result is held to.", () => Leaf("Clamp", F(0), F(1)));
+        Add("Lerp", "Transform", "RiseTime", "GameExt: seconds to ease all the way up as the input rises; 0 follows at once.",
+            () => Leaf("RiseTime", F(0.25)));
+        Add("Lerp", "Transform", "FallTime", "GameExt: seconds to ease all the way down as the input falls; 0 follows at once.",
+            () => Leaf("FallTime", F(0.25)));
+        Add("Compare", "Transform", "Hysteresis", "GameExt: how far back past B the value must go before the result turns off again.",
+            () => Leaf("Hysteresis", F(0.05)));
+        Add("Compare", "Transform", "EventOutputTrue", "GameExt: a new Bool event sent as the result turns to 1, for EventEnable.",
+            () => Leaf("EventOutputTrue", S("player1.example.on")));
+        Add("Compare", "Transform", "EventOutputFalse", "GameExt: a new Bool event sent as the result turns to 0, for EventDisable.",
+            () => Leaf("EventOutputFalse", S("player1.example.off")));
+        Add("GameExtOutput", "Transform", "EventOutput", "GameExt: the Float event it sends: a new name, which must not exist yet.",
+            () => Leaf("EventOutput", S("player1.example.output")));
+        Add("GameExtOutput", "Transform", "OutputIsAlpha", "GameExt: 1 sends the result every frame, for a group's EventAlpha, which lasts one frame.",
+            () => Leaf("OutputIsAlpha", I(1)));
+
         // ---- Not elements: FileInfo and ViewPort ----
         Add("FileInfo", "File", "Viewports", "The split-screen view counts the file is for, such as (1) or (1, 2, 3, 4).", () => Leaf("Viewports", I(1)));
         Add("FileInfo", "GameExt", "AuthoredRatio", "GameExt: (w, h), the screen shape the file was made for, such as (16, 9). The file is laid out at its real height and slid across a wider screen.", () => Leaf("AuthoredRatio", I(16), I(9)));
@@ -285,8 +378,12 @@ public static class PropertyCatalog
     }
 
     private static void Add(string reader, string group, string name, string description, Func<HudBlock> factory,
-        bool isBlock = false, bool repeatable = false) =>
-        All.Add(new PropertyDef(name, group, description, factory) { Reader = reader, IsBlock = isBlock, Repeatable = repeatable });
+        bool isBlock = false, bool repeatable = false, string? excludes = null) =>
+        All.Add(new PropertyDef(name, group, description, factory)
+        {
+            Reader = reader, IsBlock = isBlock, Repeatable = repeatable,
+            Excludes = excludes is null ? Array.Empty<string>() : new[] { excludes },
+        });
 
     /// <summary>
     /// What can be added to <paramref name="target"/>, in the Add tab's order: what its class reads
@@ -301,7 +398,8 @@ public static class PropertyCatalog
         // A key two classes read (EventText, EventColor) is offered once: as the subclass, which reads it first, has it.
         var chosen = All
             .Where(d => readers.Contains(d.Reader))
-            .Where(d => d.IsBlock ? d.Repeatable || !blocks.Contains(d.Name) : !lines.Contains(d.Name))
+            .Where(d => d.Repeatable || !(d.IsBlock ? blocks : lines).Contains(d.Name))
+            .Where(d => !d.Excludes.Any(lines.Contains))
             .GroupBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderBy(d => readers.IndexOf(d.Reader)).First())
             .ToHashSet();
@@ -353,7 +451,7 @@ public static class PropertyCatalog
                     readers.AddRange(new[] { "Target", "GroupPlayer", "GroupBase" });
                     break;
                 case ElementKind.VehicleSeating:
-                    readers.AddRange(new[] { "GroupPlayer", "GroupBase" });
+                    readers.AddRange(new[] { "Seating", "GroupPlayer", "GroupBase" });
                     break;
                 default:
                     readers.Add("GroupBase");
@@ -363,6 +461,23 @@ public static class PropertyCatalog
             return readers;
         }
         if (!target.HasBody) return readers;
+
+        var transform = target.Name switch
+        {
+            "TransformNumberColor" => new[] { "TransformColor", "TransformIO", "TransformFactor", "TransformWrap" },
+            "TransformNumberVector3" => new[] { "TransformVector3", "TransformIO", "TransformFactor", "TransformWrap" },
+            "TransformNumberColorBlend" => new[] { "TransformColorBlend", "TransformColor", "TransformIO", "TransformWrap" },
+            "TransformNameMesh" => new[] { "TransformNameMesh", "TransformIO" },
+            "TransformNumberMath" => new[] { "Math", "Operands", "GameExtOutput" },
+            "TransformNumberLerp" => new[] { "Lerp", "Operands", "GameExtOutput" },
+            "TransformNumberCompare" => new[] { "Compare", "Operands", "GameExtOutput" },
+            _ => null,
+        };
+        if (transform is not null)
+        {
+            readers.AddRange(transform);
+            return readers;
+        }
 
         if (target.Name == "FileInfo") readers.Add("FileInfo");
         else if (target.Name.Equals("ViewPort", StringComparison.OrdinalIgnoreCase)) readers.Add("ViewPort");

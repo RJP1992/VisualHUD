@@ -99,13 +99,37 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
   **On top** of it, at the slider's opacity. It is remembered between sessions and never
   saved into a `.hud` file, so a HUD needs no reference element of its own.
 
-Dragging an element changes its last `Position` line, in that line's own mode, through
-the inverse of the matrix the game draws it with.
+## Editing
 
-The Properties panel's **Add** tab offers every key the game reads for the selected block, by
-the class that reads it (an element's own, its group base, every element's) and GameExt's,
-grouped and with a filter. A template such as `MeshInfo`, `Segment` or a Target template gets
-what its element reads in it.
+- **Insert inside** (the Edit menu, or a right-click in the tree) adds a block at the end of the
+  selected element or file; **Insert after** adds it right after the selected block. They offer
+  every element type the game makes (Group, Bitmap, BitmapMasked, BarBitmap,
+  ProceduralBarBitmap, BarSegmented, Text, MultilineText, Model3D, BorderedBox, ObjectiveList,
+  VehicleSeating, Map and Target), the seven transforms (GameExt's Math, Lerp and Compare among
+  them) and a file's `FileInfo` and `ViewPort`.
+- A new block works from the start. An element shows from the start (`EventEnable("initialize")`),
+  in the middle of the screen, or at its group's origin inside one. Bars and transforms start on
+  the player's health. The map, the targets, the seating chart and the lists come as the stock
+  HUD sets them up, templates included.
+- What cannot go there is greyed out, and its tooltip says why. Only groups and the elements
+  built on one hold elements; transforms go at the top of a file or in a ViewPort; a file has one
+  `FileInfo`, at its top. [docs/Engine.md](docs/Engine.md#where-a-block-can-go) has how the game
+  reads each.
+- **Rename** with F2, a double-click on an element's line in the tree, or the name box at the top
+  of the Properties panel. A new block starts with its name selected for typing. The
+  `InheritMeshInfo` lines that name a renamed Model3D, and the `TransformNameMesh` lines that
+  copy a renamed table, change with it, in one undo step. The status bar points out a name
+  another element already has, and an ObjectiveList the game will not fill: it must be named
+  `playerNobjectives`. The templates of the map, the targets, the seating chart, a segmented bar
+  and a list keep their names, as the game finds them by keyword.
+- Dragging an element changes its last `Position` line, in that line's own mode, through the
+  inverse of the matrix the game draws it with.
+- The Properties panel's **Add** tab offers every key the game reads for the selected block, by
+  the class that reads it (an element's own, its group base, every element's) and GameExt's,
+  grouped and with a filter. A template such as `MeshInfo`, `Segment` or a Target template gets
+  what its element reads in it, and a Map, Target or VehicleSeating gets back a template it lacks.
+  A transform gets its own keys, but not a second source for A or B; another row of its table
+  starts as a copy of the last row, right after it.
 
 ## Text
 
@@ -125,21 +149,44 @@ Before any event is simulated, **Text** in the toolbar picks what text elements 
 A key the localization lacks shows as the key, as it would in game, and is listed under
 **Assets** as a missing string.
 
+## Showing and hiding
+
+What is hidden here is hidden on the canvas only; the files do not change.
+
+- Untick an element in the tree, or press **H**, to hide it and everything in it. A file's tick
+  hides its elements.
+- **Shift+H**, or a **Ctrl+click** on a tick, shows only that element or file. The other files,
+  and every element that neither holds it nor is in it, are hidden; everything in it shows.
+- **Alt+H** shows everything again. The tree's right-click menu has these under **Show and
+  hide**, with **Show everything in this** for one element or file.
+- **Ctrl+click** rows to select several, or **Shift+click** to select every row from the last one
+  clicked; a Ctrl+click on the canvas adds an element too. H, Shift+H, the **Show and hide**
+  menu, a selected row's tick, the Events tab's **Show selected** and Delete then act on all of
+  them, Delete in one undo step. The Properties panel, Rename and Insert act on the last one
+  clicked, which the canvas marks with a cross.
+
 ## Events
 
 The Events tab lists every event the files and their transforms use: what it is (sent by the
-game, by GameExt, or by a transform), its type, and who reads it. With **Simulate the game's
-events** on, the canvas shows the HUD as the game would after the events you have sent:
+game, by GameExt, or by a transform), its type, and who reads it.
 
-- An element shows only once its `EventEnable` event has come after its `EventDisable` one,
-  and only while every group above it shows. Nothing shows before any event, as in the game.
-- Bars fill, texts print their numbers and strings, colours, textures and models change, and
-  groups move, scale and turn, from the values sent. Transforms run as the game runs them, from
-  every file of the HUD in load order.
-- Type a value and press Enter, or **Send** to send it again so it counts as the latest.
-  **Initialize** sends `initialize`; **On foot** sends a typical spawned soldier's state;
-  **Show selected** sends whatever shows the selected element; **Clear** starts again.
-- **Show hidden** on the canvas draws what is not enabled faintly, so it can still be picked.
+- Type a value and press Enter, or **Send** to send it again so it counts as the latest. What it
+  sets shows on the canvas at once: bars fill, texts print their numbers and strings, colours,
+  textures and models change, and groups move, scale and turn. Transforms run as the game runs
+  them, from every file of the HUD in load order.
+- Every element keeps showing, but those hidden in the tree, so one event is enough to see what
+  it does to the elements you kept in view.
+- **Show and hide as the game does** adds the game's rule for what shows: an element shows only
+  once its `EventEnable` event has come after its `EventDisable` one, and only while every group
+  above it shows. Nothing shows before any event, as in the game. **Show hidden** on the canvas
+  then draws what is not enabled faintly, so it can still be picked.
+- **Initialize** sends `initialize`; **On foot** sends a typical spawned soldier's state and turns
+  on the game's showing and hiding; **Show selected** sends whatever shows the selected element;
+  **Clear** forgets every event sent.
+- Until it is sent, groups that follow the same `EventPosition` event are drawn at one point, the
+  written `Position` of the first of them, as the game moves them all to the point it sends.
+  Their own `Position` lines only matter until that event arrives. With the game's showing and
+  hiding on, a group whose event has not come is where it is written.
 
 The rules are in [docs/Engine.md](docs/Engine.md#events).
 
@@ -157,8 +204,9 @@ editor's saved ones),
 `--screen WxH`, `--game gameext|vanilla`, `--snap on|off`, `--viewport n`,
 `--background image.png` (draw over a screenshot of the same size), `--no-placeholders`,
 `--no-guides`, `--preset onfoot` and `--send event[=value]` (repeatable, in order) to simulate
-events, `--text examples|long|keys`, and `--dump layout.txt` to list every element as laid out. Errors are written to
-`out.png.error.txt`.
+events, which show and hide elements as the game does unless `--show all` keeps every element
+shown, `--text examples|long|keys`, and `--dump layout.txt` to list every element as laid out.
+Errors are written to `out.png.error.txt`.
 
 ```bash
 VisualHUD.exe --snapshot 1playerhud.hud out.png --preset onfoot --send player1.healthFraction=0.3

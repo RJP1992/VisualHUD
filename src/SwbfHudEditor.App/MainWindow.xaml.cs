@@ -7,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using SwbfHudEditor.App.Views;
 using SwbfHudEditor.Core.Assets;
@@ -29,6 +30,8 @@ public partial class MainWindow : Window
     // search — InputBinding/CommandBinding bypasses that entirely.
     public static readonly RoutedCommand ToggleHideSelectedCommand = new("ToggleHideSelected", typeof(MainWindow));
     public static readonly RoutedCommand UnhideAllCommand = new("UnhideAll", typeof(MainWindow));
+    public static readonly RoutedCommand RenameCommand = new("Rename", typeof(MainWindow));
+    public static readonly RoutedCommand ShowOnlySelectedCommand = new("ShowOnlySelected", typeof(MainWindow));
 
     // The open HUD: its files in load order, the transform files they need first. The game loads a
     // HUD's files additively, so the tree has a node per file and Save writes each file with edits.
@@ -58,6 +61,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Tree.ItemsSource = _files;
+        BuildInsertMenu(EditInsertInside, inside: true);
+        BuildInsertMenu(EditInsertAfter, inside: false);
+        BuildInsertMenu(TreeInsertInside, inside: true);
+        BuildInsertMenu(TreeInsertAfter, inside: false);
         Canvas.DocumentVisible = doc => FileOf(doc)?.IsVisible ?? true;
         Properties.IsDefaultLine = line => (_defaultLines ??= FindDefaultLines()).Contains(line);
         Properties.ParentOf = block => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
@@ -68,7 +75,9 @@ public partial class MainWindow : Window
             RefreshAssetList();
         };
         EventsList.Bind(_events);
-        EventsList.SimulateChanged += (_, on) => Canvas.SetEventState(on ? _events : null);
+        // The events sent always reach the canvas; the Events tab's box decides whether they also show and hide.
+        Canvas.SetEventState(_events);
+        EventsList.SimulateChanged += (_, on) => Canvas.ShowByEvents = on;
         EventsList.ShowSelectedRequested += (_, _) => ShowSelectedInSimulation();
         EventsList.OnFootRequested += (_, _) =>
         {
@@ -377,6 +386,7 @@ public partial class MainWindow : Window
     private void AfterSetChanged(string? status = null)
     {
         _defaultLines = null;
+        ClearPicks();
         // The data folders of the open files' mods join the search, read the first time they are needed.
         foreach (var folder in AutomaticAssetFolders()) EnsureScanned(folder);
         ShowAssetFolders();
@@ -708,28 +718,36 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Send what shows the selected element: the EventEnable event of it and of every group above it,
-    /// top first, with the value typed for each in the Events tab.
+    /// Send what shows the selected elements: the EventEnable event of each and of every group above
+    /// it, top first, each once, with the value typed for each in the Events tab.
     /// </summary>
     private void ShowSelectedInSimulation()
     {
-        if (Tree.SelectedItem is not HudBlock block || Locate(block) is not { } at) return;
+        var blocks = SelectedItems.OfType<HudBlock>().ToList();
+        if (blocks.Count == 0) return;
         var sends = new List<(string, HudEventValue)>();
-        foreach (var b in at.Path)
+        var sent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var block in blocks)
         {
-            if (!ElementKinds.TryGet(b, out var kind)) continue;
-            if (ElementReader.Read(b, kind).EventEnable is not { } name) continue;
-            var type = HudEventCatalog.Find(name)?.Type ?? HudEventType.Bool;
-            sends.Add((name, EventsList.TypedValue(name) ?? HudEventValue.Default(type)));
+            if (Locate(block) is not { } at) continue;
+            foreach (var b in at.Path)
+            {
+                if (!ElementKinds.TryGet(b, out var kind)) continue;
+                if (ElementReader.Read(b, kind).EventEnable is not { } name || !sent.Add(name)) continue;
+                var type = HudEventCatalog.Find(name)?.Type ?? HudEventType.Bool;
+                sends.Add((name, EventsList.TypedValue(name) ?? HudEventValue.Default(type)));
+            }
         }
         if (sends.Count == 0)
         {
-            StatusText.Text = $"{block.Name} \"{FirstName(block)}\" has no EventEnable: the game never shows it.";
+            StatusText.Text = blocks.Count == 1
+                ? $"{blocks[0].Name} \"{FirstName(blocks[0])}\" has no EventEnable: the game never shows it."
+                : "None of the selected elements has an EventEnable: the game never shows them.";
             return;
         }
         _events.SendAll(sends);
         StatusText.Text = $"Sent {string.Join(", ", sends.Select(s => s.Item1))}" +
-                          (EventsList.Simulate ? string.Empty : " (turn on simulation in the Events tab to see it)");
+                          (EventsList.Simulate ? string.Empty : " (tick Show and hide as the game does in the Events tab to see it)");
     }
 
     /// <summary>
@@ -752,6 +770,13 @@ public partial class MainWindow : Window
                 if (!target.Children[i].HasBody) insertAt = i + 1;
                 else break;
             }
+        // A table row, such as NumberColor, goes after the last row of its table.
+        for (var i = target.Children.Count - 1; i >= 0 && !e.Property.HasBody; i--)
+            if (!target.Children[i].HasBody && target.Children[i].Name.Equals(e.Property.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                insertAt = i + 1;
+                break;
+            }
         target.Children.Insert(insertAt, e.Property);
         var edit = new InsertBlockEdit(target.Children, insertAt, e.Property,
             $"add {e.Property.Name} to {target.Name}", affected: target);
@@ -762,47 +787,255 @@ public partial class MainWindow : Window
         // and keep the host block selected — the user usually wants to tweak the new value next.
         Canvas.Refresh();
         Properties.SetBlock(target);
-        StatusText.Text = $"Added {e.Property.Name} to {target.Name} \"{FirstName(target)}\"";
+        RefreshEventList();
+        StatusText.Text = e.CopiedLast
+            ? $"Added a copy of the last {e.Property.Name} row to {target.Name} \"{FirstName(target)}\": give it a key of its own."
+            : $"Added {e.Property.Name} to {target.Name} \"{FirstName(target)}\"";
     }
 
     private void Tree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
+        // Moving the selection by a plain click or the keyboard leaves one row selected.
+        if (!_picking)
+        {
+            ClearPicks();
+            _anchor = e.NewValue;
+        }
         var block = e.NewValue as HudBlock;
         Properties.SetBlock(block);
         // The guides and the layout line follow the selection's file.
         if (SelectedFile is { } file)
         {
             Canvas.ActiveDocument = file.Document;
-            if (e.NewValue is HudFile)
+            if (e.NewValue is HudFile && _picked.Count == 0)
                 StatusText.Text = $"{file.FilePath ?? file.Name}    {Canvas.DescribeFile(file.Document)}";
         }
         if (_suppressSyncBack) return;
-        Canvas.HighlightBlock(block);
+        ShowSelection();
     }
 
     private void VisibilityCheckBox_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is not FrameworkElement { DataContext: { } item }) return;
+        // Ctrl+click: this one alone.
+        if (Keyboard.Modifiers == ModifierKeys.Control) ShowOnly(new[] { item });
+        // The tick of a selected row sets every selected row.
+        else if (_picked.Count > 1 && _picked.Contains(item))
+        {
+            var shown = IsShownInTree(item);
+            foreach (var other in _picked) SetShownInTree(other, shown);
+            StatusText.Text = $"{(shown ? "Shown" : "Hidden")}: the {_picked.Count} selected.";
+        }
         Canvas.Refresh();
     }
 
     /// <summary>
-    /// On any left-click inside the tree, walk up from the hit element to find the containing
-    /// TreeViewItem and select it. Default WPF behaviour lets the embedded CheckBox consume
-    /// the click, so selecting-by-click-on-checkbox doesn't happen — the tree appears to
-    /// highlight a row without updating Tree.SelectedItem.
+    /// A left-click in the tree selects the row it is on, wherever on the row: WPF's own lets the
+    /// embedded CheckBox take the click without selecting. Ctrl+click picks or drops a row among
+    /// several selected, Shift+click picks the rows from the last one clicked; a tick's click leaves a
+    /// selection of several as it is.
     /// </summary>
     private void Tree_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is not DependencyObject hit) return;
         var node = hit;
+        var onTick = false;
+        var onArrow = false;
+        while (node is not null and not TreeViewItem)
+        {
+            // A click in the rename box is the box's: taking focus from it would end the rename.
+            if (node is TextBox) return;
+            if (node is CheckBox) onTick = true;
+            else if (node is ToggleButton) onArrow = true;
+            node = System.Windows.Media.VisualTreeHelper.GetParent(node);
+        }
+        if (node is not TreeViewItem tvi || tvi.DataContext is not { } item) return;
+        // A double-click on an element's line renames it; on the rest of the row it opens or closes it.
+        if (e.ClickCount == 2 && hit is TextBlock { Name: "HeaderLabel" } && item is HudBlock block)
+        {
+            BeginRename(block);
+            e.Handled = true;
+            return;
+        }
+        var modifiers = Keyboard.Modifiers;
+        if (onTick)
+        {
+            // While several rows are selected a tick leaves them so: it sets its row, or every selected
+            // row when its row is one of them (VisibilityCheckBox_Click).
+            if (_picked.Count > 0) return;
+        }
+        else if (!onArrow && modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            PickRange(item, add: modifiers.HasFlag(ModifierKeys.Control));
+            e.Handled = true;
+            return;
+        }
+        else if (!onArrow && modifiers.HasFlag(ModifierKeys.Control))
+        {
+            TogglePick(item);
+            e.Handled = true;
+            return;
+        }
+        tvi.IsSelected = true;
+        tvi.Focus();
+    }
+
+    /// <summary>A right-click selects the row under it, so the context menu acts on that row, or on the selected rows it is one of.</summary>
+    private void Tree_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var node = e.OriginalSource as DependencyObject;
         while (node is not null and not TreeViewItem)
             node = System.Windows.Media.VisualTreeHelper.GetParent(node);
-        if (node is TreeViewItem tvi)
-        {
-            tvi.IsSelected = true;
-            tvi.Focus();
-        }
+        if (node is not TreeViewItem tvi || _picked.Contains(tvi.DataContext)) return;
+        tvi.IsSelected = true;
+        tvi.Focus();
     }
+
+    // ── Several rows ─────────────────────────────────────────────────────────────────
+
+    // The rows picked with Ctrl or Shift, the tree's own selection among them; empty while one row is.
+    private readonly List<object> _picked = new();
+    // Where a Shift+click's rows start: the last row clicked or picked.
+    private object? _anchor;
+    // The tree's selection is moving to a picked row: the others stay picked.
+    private bool _picking;
+
+    /// <summary>The selected rows, files or blocks, as they stand: the picked ones, else the tree's selection.</summary>
+    private IReadOnlyList<object> SelectedItems =>
+        _picked.Count > 0
+            ? _picked.Where(i => i is HudFile f ? _files.Contains(f) : i is HudBlock b && Locate(b) is not null).ToList()
+            : Tree.SelectedItem is { } one ? new[] { one } : Array.Empty<object>();
+
+    private static bool IsShownInTree(object item) => item switch
+    {
+        HudBlock b => b.IsVisible,
+        HudFile f => f.IsVisible,
+        _ => true,
+    };
+
+    private static void SetShownInTree(object item, bool shown)
+    {
+        if (item is HudBlock b) b.IsVisible = shown;
+        else if (item is HudFile f) f.IsVisible = shown;
+    }
+
+    private static void SetPickedFlag(object item, bool picked)
+    {
+        if (item is HudBlock b) b.IsMultiSelected = picked;
+        else if (item is HudFile f) f.IsMultiSelected = picked;
+    }
+
+    private void Pick(object item)
+    {
+        if (_picked.Contains(item)) return;
+        _picked.Add(item);
+        SetPickedFlag(item, true);
+    }
+
+    private void ClearPicks()
+    {
+        foreach (var item in _picked) SetPickedFlag(item, false);
+        _picked.Clear();
+    }
+
+    /// <summary>Ctrl+click: add a row to the selected ones, or drop it; the row selected so far joins them.</summary>
+    private void TogglePick(object item)
+    {
+        // The one row selected stays selected: a selection is never empty.
+        if (_picked.Count == 0 && ReferenceEquals(Tree.SelectedItem, item)) return;
+        if (_picked.Count == 0 && Tree.SelectedItem is { } current) Pick(current);
+        if (_picked.Contains(item))
+        {
+            _picked.Remove(item);
+            SetPickedFlag(item, false);
+            if (_picked.Count <= 1)
+            {
+                // One row left is a plain selection again.
+                var only = _picked.FirstOrDefault();
+                ClearPicks();
+                if (only is not null) MakeCurrent(only);
+            }
+            else if (ReferenceEquals(Tree.SelectedItem, item)) MakeCurrent(_picked[^1]);
+        }
+        else
+        {
+            Pick(item);
+            MakeCurrent(item);
+        }
+        _anchor = item;
+        ShowSelection();
+    }
+
+    /// <summary>Shift+click: the rows from the last one clicked to this one, as the tree shows them; with Ctrl, added to those picked.</summary>
+    private void PickRange(object item, bool add)
+    {
+        var rows = ShownRows();
+        var from = rows.IndexOf(_anchor ?? Tree.SelectedItem ?? item);
+        var to = rows.IndexOf(item);
+        if (from < 0 || to < 0)
+        {
+            TogglePick(item);
+            return;
+        }
+        if (!add) ClearPicks();
+        else if (_picked.Count == 0 && Tree.SelectedItem is { } current) Pick(current);
+        for (var i = Math.Min(from, to); i <= Math.Max(from, to); i++) Pick(rows[i]);
+        if (_picked.Count == 1) ClearPicks();
+        MakeCurrent(item);
+        ShowSelection();
+    }
+
+    /// <summary>The rows of the tree from the top, the open ones' rows under them.</summary>
+    private List<object> ShownRows()
+    {
+        var rows = new List<object>();
+        void Walk(ItemsControl parent)
+        {
+            foreach (var item in parent.Items)
+            {
+                rows.Add(item);
+                if (parent.ItemContainerGenerator.ContainerFromItem(item) is TreeViewItem { IsExpanded: true } open) Walk(open);
+            }
+        }
+        Walk(Tree);
+        return rows;
+    }
+
+    /// <summary>Make a picked row the one the Properties panel shows, keeping the others picked.</summary>
+    private void MakeCurrent(object item)
+    {
+        _picking = true;
+        try
+        {
+            switch (item)
+            {
+                case HudFile file when Tree.ItemContainerGenerator.ContainerFromItem(file) is TreeViewItem row:
+                    row.IsSelected = true;
+                    row.Focus();
+                    break;
+                case HudBlock block when Locate(block) is { } at:
+                    SelectPath(at.File, at.Path)?.Focus();
+                    break;
+            }
+        }
+        finally { _picking = false; }
+    }
+
+    /// <summary>Outline the selected elements on the canvas, and say how many rows are selected.</summary>
+    private void ShowSelection()
+    {
+        var items = SelectedItems;
+        Canvas.HighlightBlocks(items.OfType<HudBlock>().ToList(), Tree.SelectedItem as HudBlock);
+        if (_picked.Count > 1)
+            StatusText.Text = $"{_picked.Count} selected: H hides or shows them, Shift+H shows only them, Del deletes them.";
+    }
+
+    private static string Describe(IReadOnlyList<object> items) => items.Count switch
+    {
+        1 when items[0] is HudBlock b => $"{b.Name} \"{FirstName(b)}\"",
+        1 when items[0] is HudFile f => f.Name,
+        _ => $"the {items.Count} selected",
+    };
 
     private void Canvas_HoverInfoChanged(object? sender, string? info)
     {
@@ -837,6 +1070,7 @@ public partial class MainWindow : Window
 
     private void AfterUndoRedo(HudBlock? affected, string verb)
     {
+        ClearPicks();
         Canvas.Refresh();
         RefreshEventList();
         if (affected is not null)
@@ -875,25 +1109,29 @@ public partial class MainWindow : Window
     /// <summary>H keybinding — toggles the selected block's, or file's, visibility on the canvas.</summary>
     private void ToggleHideSelected_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        switch (Tree.SelectedItem)
-        {
-            case HudBlock block:
-                block.IsVisible = !block.IsVisible;
-                StatusText.Text = $"{(block.IsVisible ? "Shown" : "Hidden")}: {block.Name} \"{FirstName(block)}\"";
-                break;
-            case HudFile file:
-                file.IsVisible = !file.IsVisible;
-                StatusText.Text = $"{(file.IsVisible ? "Shown" : "Hidden")}: {file.Name}";
-                break;
-            default:
-                return;
-        }
+        if (ToggleHideSelected()) e.Handled = true;
+    }
+
+    /// <summary>Hide the selected rows, or show them when all are hidden already.</summary>
+    private bool ToggleHideSelected()
+    {
+        var items = SelectedItems;
+        if (items.Count == 0) return false;
+        var shown = !items.Any(IsShownInTree);
+        foreach (var item in items) SetShownInTree(item, shown);
+        StatusText.Text = $"{(shown ? "Shown" : "Hidden")}: {Describe(items)}";
         Canvas.Refresh();
-        e.Handled = true;
+        return true;
     }
 
     /// <summary>Alt+H keybinding — unhides every hidden block and file.</summary>
     private void UnhideAll_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        ShowEverything();
+        e.Handled = true;
+    }
+
+    private void ShowEverything()
     {
         var count = 0;
         foreach (var file in _files)
@@ -903,7 +1141,6 @@ public partial class MainWindow : Window
         }
         Canvas.Refresh();
         StatusText.Text = count > 0 ? $"Unhid {count} element{(count == 1 ? "" : "s")}." : "Nothing was hidden.";
-        e.Handled = true;
     }
 
     private static int UnhideAll(IEnumerable<HudBlock> blocks)
@@ -917,120 +1154,430 @@ public partial class MainWindow : Window
         return changed;
     }
 
+    private void ToggleHide_Click(object sender, RoutedEventArgs e) => ToggleHideSelected();
+
+    private void ShowOnly_Click(object sender, RoutedEventArgs e) => ShowOnlySelected();
+    private void ShowOnly_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        ShowOnlySelected();
+        e.Handled = true;
+    }
+
+    private void ShowOnlySelected()
+    {
+        var items = SelectedItems;
+        if (items.Count == 0)
+        {
+            StatusText.Text = "Select elements or files in the tree to show only them.";
+            return;
+        }
+        ShowOnly(items);
+        Canvas.Refresh();
+    }
+
+    /// <summary>
+    /// Hide everything but <paramref name="items"/> on the canvas: the other files, and in the files of
+    /// the blocks among them every block that neither holds one nor is in one. A hidden block's own
+    /// blocks keep their ticks, so showing it again brings them back as they were; what is in one of
+    /// <paramref name="items"/> all shows, and a whole file among them keeps its ticks.
+    /// </summary>
+    private void ShowOnly(IReadOnlyList<object> items)
+    {
+        var wholeFiles = items.OfType<HudFile>().ToHashSet();
+        var kept = new HashSet<HudBlock>(ReferenceEqualityComparer.Instance);
+        var holders = new HashSet<HudBlock>(ReferenceEqualityComparer.Instance);
+        var pruned = new HashSet<HudFile>();
+        foreach (var block in items.OfType<HudBlock>())
+        {
+            if (Locate(block) is not { } at) continue;
+            kept.Add(block);
+            holders.UnionWith(at.Path);
+            if (!wholeFiles.Contains(at.File)) pruned.Add(at.File);
+        }
+        // A file without elements, such as the transforms, draws nothing: it keeps its tick.
+        foreach (var f in _files)
+            if (HudLayout.TopLevelElements(f.Document).Any()) f.IsVisible = wholeFiles.Contains(f) || pruned.Contains(f);
+        void Apply(IEnumerable<HudBlock> blocks)
+        {
+            foreach (var b in blocks.Where(b => b.HasBody))
+            {
+                if (kept.Contains(b)) UnhideAll(new[] { b });
+                else if (holders.Contains(b))
+                {
+                    b.IsVisible = true;
+                    Apply(b.Children);
+                }
+                // A ViewPort's elements are top-level ones; FileInfo and transforms draw nothing.
+                else if (!ElementKinds.TryGet(b, out _)) Apply(b.Children);
+                else b.IsVisible = false;
+            }
+        }
+        foreach (var file in pruned) Apply(file.Document.TopLevel);
+        StatusText.Text = $"Showing only {Describe(items)}. Alt+H shows everything again.";
+    }
+
+    /// <summary>Show the selected rows, what holds them and everything in them.</summary>
+    private void ShowInside_Click(object sender, RoutedEventArgs e)
+    {
+        var items = SelectedItems;
+        if (items.Count == 0) return;
+        foreach (var item in items)
+        {
+            switch (item)
+            {
+                case HudFile file:
+                    file.IsVisible = true;
+                    UnhideAll(file.Document.TopLevel);
+                    break;
+                case HudBlock block when Locate(block) is { } at:
+                    at.File.IsVisible = true;
+                    foreach (var holder in at.Path) holder.IsVisible = true;
+                    UnhideAll(block.Children);
+                    break;
+            }
+        }
+        StatusText.Text = $"Showing all of {Describe(items)}.";
+        Canvas.Refresh();
+    }
+
+    private void ShowAll_Click(object sender, RoutedEventArgs e) => ShowEverything();
+
     // ── Structural edits ───────────────────────────────────────────────────────────
 
     private void DeleteSelected_Click(object sender, RoutedEventArgs e) => DeleteSelected();
 
     /// <summary>Delete the selected block, or take the selected file out of the HUD.</summary>
+    /// <summary>
+    /// Delete the selected blocks as one undoable edit; with only files selected, take them out of the
+    /// HUD. A block inside another selected one goes with it.
+    /// </summary>
     private void DeleteSelected()
     {
-        if (Tree.SelectedItem is HudFile file)
+        var items = SelectedItems;
+        var blocks = items.OfType<HudBlock>().ToList();
+        if (blocks.Count == 0)
         {
-            RemoveFile(file);
+            foreach (var file in items.OfType<HudFile>().ToList()) RemoveFile(file);
             return;
         }
-        if (Tree.SelectedItem is not HudBlock block || FileOf(block) is not { } owner) return;
-        var container = owner.Document.FindContainer(block);
-        if (container is null) return;
-        var (list, index, parent) = container.Value;
+        var selected = new HashSet<HudBlock>(blocks, ReferenceEqualityComparer.Instance);
+        var targets = new List<(ObservableCollection<HudBlock> List, int Index, HudBlock Block, HudBlock? Parent)>();
+        foreach (var block in blocks)
+        {
+            if (Locate(block) is not { } at || at.Path.Take(at.Path.Count - 1).Any(selected.Contains)) continue;
+            if (at.File.Document.FindContainer(block) is not { } container) continue;
+            targets.Add((container.Container, container.Index, block, container.Parent));
+        }
+        if (targets.Count == 0) return;
 
-        list.RemoveAt(index);
-        var edit = new DeleteBlockEdit(list, index, block, affected: parent);
+        // The later ones in a list first, so each index still holds its block; undo puts them back in turn.
+        var edits = targets.OrderByDescending(t => t.Index)
+            .Select(t => (IHudEdit)new DeleteBlockEdit(t.List, t.Index, t.Block, affected: t.Parent))
+            .ToList();
+        var first = targets[0];
+        IHudEdit edit = edits.Count == 1 ? edits[0] : new CompositeEdit(edits, $"delete {edits.Count} blocks");
+        edit.Apply();
         _undo.Push(edit);
+
+        ClearPicks();
+        Canvas.Refresh();
+        Properties.SetBlock(first.Parent);
+        ShowSelection();
+        RefreshEventList();
+        StatusText.Text = targets.Count == 1
+            ? $"Deleted {first.Block.Name} \"{FirstName(first.Block)}\""
+            : $"Deleted {targets.Count} blocks. Ctrl+Z puts them back.";
+    }
+
+    // ── Insert ───────────────────────────────────────────────────────────────────────
+
+    /// <summary>Where an insert goes: a file, the block that will hold it (null: the top of the file), the list and the index.</summary>
+    private sealed record InsertTarget(HudFile File, HudBlock? Container, ObservableCollection<HudBlock> List, int Index);
+
+    /// <summary>
+    /// Fill an Insert menu with every block the editor can make, by category; a category of one is a
+    /// single item. Whether each fits is decided when the menu opens (<see cref="UpdateInsertMenu"/>).
+    /// </summary>
+    private void BuildInsertMenu(MenuItem root, bool inside)
+    {
+        TemplateFamily? family = null;
+        foreach (var category in HudBlockTemplates.Categories)
+        {
+            var templates = HudBlockTemplates.All.Where(t => t.Category == category).ToList();
+            if (templates.Count == 0) continue;
+            if (family is { } last && last != templates[0].Family) root.Items.Add(new Separator());
+            family = templates[0].Family;
+            if (templates.Count == 1)
+            {
+                root.Items.Add(TemplateItem(templates[0], inside));
+                continue;
+            }
+            var submenu = new MenuItem { Header = category };
+            foreach (var template in templates) submenu.Items.Add(TemplateItem(template, inside));
+            root.Items.Add(submenu);
+        }
+    }
+
+    private MenuItem TemplateItem(BlockTemplate template, bool inside)
+    {
+        var item = new MenuItem
+        {
+            Header = template.Keyword,
+            InputGestureText = template.GameExt ? "GameExt" : string.Empty,
+            ToolTip = template.Description,
+            Tag = (template, inside),
+        };
+        ToolTipService.SetShowOnDisabled(item, true);
+        item.Click += InsertTemplate_Click;
+        return item;
+    }
+
+    private static IEnumerable<MenuItem> TemplateItems(ItemsControl menu) =>
+        menu.Items.OfType<MenuItem>().SelectMany(m => m.Tag is ValueTuple<BlockTemplate, bool> ? new[] { m } : TemplateItems(m));
+
+    private void TreeMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        UpdateInsertMenu(TreeInsertInside, inside: true);
+        UpdateInsertMenu(TreeInsertAfter, inside: false);
+        UpdateRenameItem(TreeRename);
+        TreeToggleHide.Header = SelectedItems.Any(IsShownInTree) ? "Hide" : "Show";
+    }
+
+    private void EditMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, sender)) return;
+        UpdateInsertMenu(EditInsertInside, inside: true);
+        UpdateInsertMenu(EditInsertAfter, inside: false);
+        UpdateRenameItem(EditRename);
+    }
+
+    /// <summary>Enable what fits where the insert would go; a greyed entry's tooltip says why not.</summary>
+    private void UpdateInsertMenu(MenuItem root, bool inside)
+    {
+        var target = InsertTargetFor(inside, out var why);
+        root.IsEnabled = target is not null;
+        root.ToolTip = target is null ? why : $"Into {Describe(target)}.";
+        if (target is null) return;
+        foreach (var item in TemplateItems(root))
+        {
+            var (template, _) = (ValueTuple<BlockTemplate, bool>)item.Tag;
+            var reason = WhyNotInsert(template, target);
+            item.IsEnabled = reason is null;
+            item.ToolTip = reason is null ? template.Description : $"{reason}\n\n{template.Description}";
+        }
+    }
+
+    private string? WhyNotInsert(BlockTemplate template, InsertTarget target) =>
+        HudBlockTemplates.WhyNot(template, target.Container, target.File.Document) ??
+        (template.Keyword != "FileInfo" && template.NewName(IsNameTaken()) is null
+            ? "Every player has an ObjectiveList already. The game fills only the list named playerNobjectives."
+            : null);
+
+    /// <summary>
+    /// Where Insert inside or Insert after would put a block, or null with <paramref name="why"/> not.
+    /// Inside: into the selected block, at its end, or at the end of the selected file (or the first
+    /// file, with nothing selected). After: right after the selected block, beside it.
+    /// </summary>
+    private InsertTarget? InsertTargetFor(bool inside, out string? why)
+    {
+        why = null;
+        if (inside)
+        {
+            if (Tree.SelectedItem is HudBlock block && FileOf(block) is { } file)
+            {
+                why = HudBlockTemplates.WhyNothingFits(block);
+                return why is null ? new InsertTarget(file, block, block.Children, block.Children.Count) : null;
+            }
+            if (ActiveFile is not { } active)
+            {
+                why = "Open a HUD file first.";
+                return null;
+            }
+            return new InsertTarget(active, null, active.Document.TopLevel, active.Document.TopLevel.Count);
+        }
+        if (Tree.SelectedItem is not HudBlock selected || FileOf(selected) is not { } owner ||
+            owner.Document.FindContainer(selected) is not { } at)
+        {
+            why = "Select an element in the tree to insert after it.";
+            return null;
+        }
+        why = HudBlockTemplates.WhyNothingFits(at.Parent);
+        return why is null ? new InsertTarget(owner, at.Parent, at.Container, at.Index + 1) : null;
+    }
+
+    private static string Describe(InsertTarget target) =>
+        target.Container is { } block ? $"{block.Name} \"{FirstName(block)}\"" : target.File.Name;
+
+    private void InsertTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: ValueTuple<BlockTemplate, bool> tag }) return;
+        var (template, inside) = tag;
+        if (InsertTargetFor(inside, out var why) is not { } target)
+        {
+            StatusText.Text = why ?? "There is nowhere to insert it.";
+            return;
+        }
+        if (WhyNotInsert(template, target) is { } reason)
+        {
+            StatusText.Text = reason;
+            return;
+        }
+        var name = template.Keyword == "FileInfo"
+            ? Path.GetFileNameWithoutExtension(target.File.FilePath) ?? template.BaseName
+            : template.NewName(IsNameTaken())!;
+        // Inside an element it sits at its group's origin; at the top of a file, or in a ViewPort, mid-screen.
+        var block = template.Create(name, nested: target.Container is { } container && ElementKinds.TryGet(container, out _));
+        // FileInfo is read first: the game decides from it whether to load the file at all.
+        var index = template.Keyword == "FileInfo" ? 0 : target.Index;
+        // A blank line before it, as the stock files space their elements.
+        if (index > 0) block.Trivia = new HudTrivia { Before = new List<string> { string.Empty } };
+        target.List.Insert(index, block);
+        _undo.Push(new InsertBlockEdit(target.List, index, block, $"insert {block.Name} \"{name}\"", affected: block));
 
         Canvas.Refresh();
-        Properties.SetBlock(parent);
         RefreshEventList();
-        StatusText.Text = $"Deleted {block.Name} \"{FirstName(block)}\"";
+        if (Locate(block) is { } at) SelectPath(at.File, at.Path);
+        StatusText.Text = $"Inserted {block.Name} \"{name}\" into {Describe(target)}" +
+                          (template.GameExt ? ". It needs GameExt: the stock game skips it." : ".");
+        // Name it straight away, as a new folder is; Enter or a click elsewhere keeps the name.
+        if (HudRename.WhyNot(block, target.Container) is null)
+            Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => BeginRename(block));
     }
 
-    private void InsertChild_Group_Click(object sender, RoutedEventArgs e) => InsertChildOfSelected(HudBlockTemplates.NewGroup(UniqueName("new_group")));
-    private void InsertChild_Bitmap_Click(object sender, RoutedEventArgs e) => InsertChildOfSelected(HudBlockTemplates.NewBitmap(UniqueName("new_bitmap")));
-    private void InsertChild_BarBitmap_Click(object sender, RoutedEventArgs e) => InsertChildOfSelected(HudBlockTemplates.NewBarBitmap(UniqueName("new_barbitmap")));
-    private void InsertChild_Text_Click(object sender, RoutedEventArgs e) => InsertChildOfSelected(HudBlockTemplates.NewText(UniqueName("new_text")));
-    private void InsertChild_Model3D_Click(object sender, RoutedEventArgs e) => InsertChildOfSelected(HudBlockTemplates.NewModel3D(UniqueName("new_model3d")));
+    private static string FirstName(HudBlock b) => HudRename.NameOf(b) ?? "(unnamed)";
 
-    private void InsertTopLevel_Group_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewGroup(UniqueName("new_group")));
-    private void InsertTopLevel_Bitmap_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewBitmap(UniqueName("new_bitmap")));
-    private void InsertTopLevel_BarBitmap_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewBarBitmap(UniqueName("new_barbitmap")));
-    private void InsertTopLevel_Text_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewText(UniqueName("new_text")));
-    private void InsertTopLevel_Model3D_Click(object sender, RoutedEventArgs e) => InsertTopLevel(HudBlockTemplates.NewModel3D(UniqueName("new_model3d")));
-
-    /// <summary>Insert into the selected block, or at the top of the selected file.</summary>
-    private void InsertChildOfSelected(HudBlock newBlock)
+    /// <summary>Whether an element or another block of any file of the HUD has a name; the game hashes names without case.</summary>
+    private Func<string, bool> IsNameTaken()
     {
-        if (Tree.SelectedItem is not HudBlock parent)
-        {
-            InsertTopLevel(newBlock);
-            return;
-        }
-        if (!parent.HasBody)
-        {
-            MessageBox.Show(this, $"'{parent.Name}' is a leaf node and can't hold children. Selecting a Group or other container first.",
-                "Can't insert child", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        var index = parent.Children.Count;
-        parent.Children.Insert(index, newBlock);
-        var edit = new InsertBlockEdit(parent.Children, index, newBlock, $"insert {newBlock.Name}", affected: newBlock);
-        _undo.Push(edit);
-        AfterStructuralInsert(newBlock);
-    }
-
-    /// <summary>Insert at the end of the selection's file.</summary>
-    private void InsertTopLevel(HudBlock newBlock)
-    {
-        if (ActiveFile is not { } file) return;
-        var topLevel = file.Document.TopLevel;
-        var index = topLevel.Count;
-        topLevel.Insert(index, newBlock);
-        var edit = new InsertBlockEdit(topLevel, index, newBlock, $"insert top-level {newBlock.Name}", affected: newBlock);
-        _undo.Push(edit);
-        AfterStructuralInsert(newBlock);
-    }
-
-    private void AfterStructuralInsert(HudBlock newBlock)
-    {
-        Canvas.Refresh();
-        RefreshEventList();
-        Properties.SetBlock(newBlock);
-        StatusText.Text = $"Inserted {newBlock.Name} \"{FirstName(newBlock)}\"";
-    }
-
-    private static string FirstName(HudBlock b) =>
-        b.Arguments.Count > 0 && b.Arguments[0].Kind == HudArgKind.String ? b.Arguments[0].Raw : "(unnamed)";
-
-    /// <summary>A name no block of any file of the HUD has yet.</summary>
-    private string UniqueName(string baseName)
-    {
-        var existing = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var file in _files) CollectNames(file.Document.TopLevel, existing);
-        if (!existing.Contains(baseName)) return baseName;
-        for (var i = 1; i < 10_000; i++)
-        {
-            var candidate = $"{baseName}_{i}";
-            if (!existing.Contains(candidate)) return candidate;
-        }
-        return baseName;
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in _files) CollectNames(file.Document.TopLevel, names);
+        return names.Contains;
     }
 
     private static void CollectNames(IEnumerable<HudBlock> blocks, HashSet<string> into)
     {
-        foreach (var b in blocks)
+        foreach (var b in blocks.Where(b => b.HasBody))
         {
-            if (b.Arguments.Count > 0 && b.Arguments[0].Kind == HudArgKind.String)
-                into.Add(b.Arguments[0].Raw);
+            if (HudRename.NameOf(b) is { } name) into.Add(name);
             CollectNames(b.Children, into);
         }
+    }
+
+    // ── Rename ───────────────────────────────────────────────────────────────────────
+
+    // The tree row being renamed: its block, the box in place of its line, the line, and the row.
+    private (HudBlock Block, TextBox Box, TextBlock Label, TreeViewItem Row)? _renaming;
+
+    private void Rename_Click(object sender, RoutedEventArgs e) => BeginRenameSelected();
+    private void Rename_Executed(object sender, ExecutedRoutedEventArgs e) => BeginRenameSelected();
+
+    private void UpdateRenameItem(MenuItem item)
+    {
+        var why = Tree.SelectedItem is HudBlock block ? RenameRefusal(block) : "Select an element in the tree to rename it.";
+        item.IsEnabled = why is null;
+        item.ToolTip = why ?? "Rename the selected element in the tree.";
+    }
+
+    private string? RenameRefusal(HudBlock block) => HudRename.WhyNot(block, ParentOf(block));
+
+    private HudBlock? ParentOf(HudBlock block) => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
+
+    private void BeginRenameSelected()
+    {
+        if (Tree.SelectedItem is HudBlock block) BeginRename(block);
+        else StatusText.Text = "Select an element in the tree to rename it.";
+    }
+
+    /// <summary>Swap the block's line in the tree for a box holding its name, selected for typing over.</summary>
+    private void BeginRename(HudBlock block)
+    {
+        if (_renaming is not null) return;
+        if (RenameRefusal(block) is { } why)
+        {
+            StatusText.Text = why;
+            return;
+        }
+        if (Locate(block) is not { } at || SelectPath(at.File, at.Path) is not { } row ||
+            row.Template.FindName("PART_Header", row) is not ContentPresenter header ||
+            header.ContentTemplate?.FindName("RenameBox", header) is not TextBox box ||
+            header.ContentTemplate.FindName("HeaderLabel", header) is not TextBlock label)
+        {
+            Properties.FocusName();
+            return;
+        }
+        _renaming = (block, box, label, row);
+        box.Text = HudRename.NameOf(block);
+        label.Visibility = Visibility.Collapsed;
+        box.Visibility = Visibility.Visible;
+        box.Focus();
+        box.SelectAll();
+    }
+
+    private void RenameBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.Escape)) return;
+        var row = _renaming?.Row;
+        EndRename(commit: e.Key == Key.Enter);
+        row?.Focus();
+        e.Handled = true;
+    }
+
+    private void RenameBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => EndRename(commit: true);
+
+    private void EndRename(bool commit)
+    {
+        if (_renaming is not { } renaming) return;
+        // First, so the focus the hidden box loses does not end it again.
+        _renaming = null;
+        renaming.Box.Visibility = Visibility.Collapsed;
+        renaming.Label.Visibility = Visibility.Visible;
+        if (commit) ApplyRename(renaming.Block, renaming.Box.Text);
+    }
+
+    private void Properties_RenameRequested(object? sender, RenameRequestedEventArgs e)
+    {
+        if (!ApplyRename(e.Block, e.NewName)) Properties.RefreshHeader();
+    }
+
+    /// <summary>
+    /// Rename a block, and the lines that find it by name, as one undoable edit; the status bar says
+    /// what the game makes of the new name. False when the name cannot be written.
+    /// </summary>
+    private bool ApplyRename(HudBlock block, string newName)
+    {
+        if (HudRename.NameOf(block) is not { } oldName) return false;
+        newName = newName.Trim();
+        if (newName == oldName) return true;
+        if (HudRename.Invalid(newName) is { } invalid)
+        {
+            StatusText.Text = invalid;
+            return false;
+        }
+        var plan = HudRename.Plan(Documents, block, newName);
+        plan.Edit.Apply();
+        _undo.Push(plan.Edit);
+        Canvas.Refresh();
+        RefreshEventList();
+        Properties.RefreshHeader();
+        StatusText.Text = $"Renamed {block.Name} \"{oldName}\" to \"{newName}\"." +
+                          (plan.Notes.Count > 0 ? " " + string.Join(" ", plan.Notes) : string.Empty);
+        return true;
     }
 
     private void Canvas_BlockSelected(object? sender, HudBlock block)
     {
         if (Locate(block) is not { } at) return;
+        // Ctrl+click on the canvas picks or drops it, as in the tree.
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            TogglePick(block);
+            return;
+        }
 
         _suppressSyncBack = true;
         try
         {
+            ClearPicks();
             SelectPath(at.File, at.Path);
             Canvas.HighlightBlock(block);
         }
@@ -1039,21 +1586,23 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Select the tree row for the last block of <paramref name="path"/>, the blocks from the top of
-    /// <paramref name="file"/> down to it, expanding each on the way.
+    /// <paramref name="file"/> down to it, expanding each on the way; the row, or null when it has none.
     /// </summary>
-    private void SelectPath(HudFile file, IReadOnlyList<HudBlock> path)
+    private TreeViewItem? SelectPath(HudFile file, IReadOnlyList<HudBlock> path)
     {
         Tree.UpdateLayout();
-        if (Tree.ItemContainerGenerator.ContainerFromItem(file) is not TreeViewItem current) return;
+        if (Tree.ItemContainerGenerator.ContainerFromItem(file) is not TreeViewItem current) return null;
         foreach (var block in path)
         {
             current.IsExpanded = true;
             current.UpdateLayout();
-            if (current.ItemContainerGenerator.ContainerFromItem(block) is not TreeViewItem next) return;
+            if (current.ItemContainerGenerator.ContainerFromItem(block) is not TreeViewItem next) return null;
             current = next;
         }
         current.IsSelected = true;
         current.BringIntoView();
+        current.UpdateLayout();
+        return current;
     }
 
     internal static LocalizationTable? TryLoadLocalization(AssetResolver assets)

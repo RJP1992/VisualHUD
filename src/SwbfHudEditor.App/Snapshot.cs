@@ -15,7 +15,8 @@ namespace SwbfHudEditor.App;
 /// <code>
 /// VisualHUD.exe --snapshot file.hud out.png [--add other.hud]... [--screen 1280x720] [--game gameext|vanilla]
 ///               [--snap on|off] [--viewport 1] [--background shot.png] [--no-placeholders] [--no-guides]
-///               [--preset onfoot] [--send event[=value]]... [--dump layout.txt] [--text examples|long|keys]
+///               [--preset onfoot] [--send event[=value]]... [--show events|all] [--dump layout.txt]
+///               [--text examples|long|keys]
 /// </code>
 /// <c>--add</c>, repeated, loads more files after the first, as the game loads a HUD's files: each laid
 /// out by its own <c>FileInfo</c>. The transform files beside them load first, as in the editor.
@@ -23,7 +24,8 @@ namespace SwbfHudEditor.App;
 /// searched automatically, then its saved asset folders; <c>--assets folder</c>, repeated, searches more.
 /// <c>--background</c> draws the HUD over an image of the same size, such as an in-game screenshot.
 /// <c>--preset onfoot</c> sends the Events tab's on-foot scenario, then <c>--send</c>, repeated, sends
-/// more events in that order (a value typed as in the Events tab).
+/// more events in that order (a value typed as in the Events tab). They decide what shows, as in the
+/// game, unless <c>--show all</c> keeps every element shown and lets them set only what they set.
 /// <c>--dump</c> writes every element as laid out: shown or not, where, and what it draws.
 /// Errors go to <c>out.png.error.txt</c>; the exit code is 0 on success.
 /// </summary>
@@ -63,6 +65,7 @@ internal static class Snapshot
         var sends = new List<(string Name, string? Value)>();
         string? dump = null;
         string? preset = null;
+        var showByEvents = true;
         var textPreview = TextPreview.Examples;
         var paths = new List<string> { hudPath };
         var assetFolders = new List<string>();
@@ -116,6 +119,14 @@ internal static class Snapshot
                 case "--assets":
                     assetFolders.Add(Path.GetFullPath(Next()));
                     break;
+                case "--show":
+                    showByEvents = Next().ToLowerInvariant() switch
+                    {
+                        "events" => true,
+                        "all" => false,
+                        _ => throw new ArgumentException("--show takes events or all"),
+                    };
+                    break;
                 case "--preset":
                     preset = Next().ToLowerInvariant();
                     if (preset != "onfoot") throw new ArgumentException("--preset takes onfoot");
@@ -146,6 +157,7 @@ internal static class Snapshot
                     throw new ArgumentException($"{name}: \"{text}\" is not a {type}");
                 state.Send(name, value);
             }
+            canvas.ShowByEvents = showByEvents;
             canvas.SetEventState(state);
         }
 

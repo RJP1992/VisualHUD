@@ -50,6 +50,27 @@ Each element type's `ReadData` takes its own keys and hands the rest down to
 - `Viewport(n)` counts only on a top-level element: `HUD::Element::GetViewport`
   (P `005F3BE0`) asks the element's group, up to the top.
 
+## Where a block can go
+
+What the Insert menus offer where (`HudBlockTemplates.WhyNot`):
+
+- **The top of a file.** `HUD::Manager::Load` makes an item of every block, by the hash of
+  its keyword: an element, a transform, a `FileInfo` or a `ViewPort`.
+- **A `ViewPort`.** `ViewPort::Read` (P `0061EDF0`) reads its scope once per camera and
+  makes an item of every block in it, elements included.
+- **A group, and every element built on one.** `ElementGroupBase::Read` (P `005FC310`) hands
+  each block to `ReadChild` (P `005FC3F0`), which makes the item and keeps it as a child only
+  when its factory makes an element; a transform there is made but belongs to no group. Map
+  (P `006009E0`), Target (P `006098C0`), MultilineText (P `00607DA0`) and VehicleSeating
+  (P `0060E300`) first match their own templates, by the hash of the line's keyword, so a
+  template's quoted name is a label, then hand any other block to `ReadChild` too.
+- **Any other element** reads with `HUD::Item::Read` (P `00617D10`): a block in its body is
+  read as more lines of the element itself, so a Bitmap inside a Text makes nothing.
+
+The editor keeps transforms to the top of a file and to ViewPorts, where `hudtransforms.hud`
+has them and where the event simulation reads them. A `FileInfo` goes first: the game reads it
+to decide whether to load the file at all.
+
 ## Setup: what each element's PostReadSetup leaves
 
 `HUD::ConvertRelativeToPixels(mode, value, frame, view, screen)` (M `00691120`):
@@ -149,8 +170,9 @@ its character, advance, left, top, right and bottom, the fields of the munged `G
 
 The preview draws each character where the layout places it, with the game font's widths when
 its `.fff` is found; the glyphs themselves are a system typeface at the font's capital height.
-Before events are simulated, a text element shows an example of what its events send (Text:
-Examples or Long in the toolbar) or the keys and event names (Keys).
+Until its events send it something, a text element shows an example of what they would send
+(Text: Examples or Long in the toolbar) or the keys and event names (Keys); with the game's showing
+and hiding on, a text that shows only what its events send stays empty until then.
 
 ## Several files
 
@@ -166,8 +188,8 @@ lvl). Every file loads into the same screen groups:
 - **Top-level order.** A top-level element's drawable joins its screen group when the element is
   enabled (`HUD::Element::UpdateEnableState`, P `005F5C00`), after every drawable of an equal or
   higher z-order, its `ZOrder` line having set its z-order before. Among top-level elements of
-  equal z-order, the one enabled later draws on top, whatever its file. Until events are
-  simulated the editor uses load order, file by file.
+  equal z-order, the one enabled later draws on top, whatever its file. Unless the events decide
+  what shows, the editor uses load order, file by file.
 
 ## GameExt
 
@@ -192,6 +214,9 @@ error for each).
 
 `SwbfHudEditor.Core/Events` simulates what the game's events do, for the Events tab and
 `--preset`/`--send`. The editor keeps the latest send of each event and the order sends came in.
+The events always set what their handlers set; whether they also decide what shows is a choice
+(`LayoutOptions.ShowByEvents`, the Events tab's *Show and hide as the game does*, `--show`):
+without it every element shows, as before any event.
 
 - **Showing and hiding.** An element starts disabled (`HUD::Element` constructor, P
   `005F1E70`, sets `enableState_Disabled`). `EventEnable` and `EventDisable` take any event,
@@ -214,6 +239,12 @@ error for each).
   `EventPosition` is read in its Rect mode and aligned again, `EventScale` sets its own axes'
   lengths and `EventRotation` rebuilds its rotation keeping them (P `005FB930`, `005FBDE0`,
   `005FBAC0`); `EventAlpha` replaces a group's alpha.
+- **One point per position event.** Every group bound to an `EventPosition` event is moved to the
+  point it sends, read in each group's Rect mode and aligned by its Rect; a group's written
+  `Position` only lasts until then. Until such an event is sent, the editor takes it to have sent
+  the first bound group's written position, so groups that follow it together stay together;
+  not while the events decide what shows, where a group the event has not reached is where it is
+  written, as in the game.
 - **GameExt's world-tracking positions** (reticule, lock-on, target, command posts) in a file it
   lays out land on the real screen point: x is handed over as `(v·W − slide) / WL`.
 - **Names** hash with `PblHash` (FNV-1a, each byte OR 0x20), so they match whatever their case.

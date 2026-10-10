@@ -77,7 +77,7 @@ public partial class HudCanvas : UserControl
     public event EventHandler<HudBlock>? BlockDragged;
     /// <summary>Fires once when a drag ends with a real position change, carrying the undoable edit.</summary>
     public event EventHandler<IHudEdit>? BlockDragCommitted;
-    /// <summary>Fires after each render with the events' effect, or null when simulation is off.</summary>
+    /// <summary>Fires after each render with the events' effect, or null when no events apply.</summary>
     public event EventHandler<HudSimulation?>? SimulationUpdated;
 
     public HudCanvas()
@@ -186,8 +186,8 @@ public partial class HudCanvas : UserControl
     public string? DescribeFile(HudDocument doc) => _layout?.LayoutOf(doc) is { } file ? Describe(_layout.Options, file) : null;
 
     /// <summary>
-    /// Draw as the game does once these events have been sent, or, with null, every element enabled in
-    /// its load state.
+    /// The events sent, which set values, texts, colours, models and moves; with null, every element is
+    /// in its load state. What shows follows them only with <see cref="ShowByEvents"/>.
     /// </summary>
     public void SetEventState(HudEventState? events)
     {
@@ -195,6 +195,23 @@ public partial class HudCanvas : UserControl
         _events = events;
         if (_events is not null) _events.Changed += Events_Changed;
         Render();
+    }
+
+    private bool _showByEvents;
+    /// <summary>
+    /// The events decide what shows, as in the game: an element shows once its EventEnable has come
+    /// after its EventDisable, and only while every group above it shows. Off, every element shows but
+    /// those hidden in the tree, and the events set only what they set.
+    /// </summary>
+    public bool ShowByEvents
+    {
+        get => _showByEvents;
+        set
+        {
+            if (_showByEvents == value) return;
+            _showByEvents = value;
+            Render();
+        }
     }
 
     private void Events_Changed(object? sender, EventArgs e) => Render();
@@ -307,7 +324,7 @@ public partial class HudCanvas : UserControl
 
         _graph = HudTransformGraph.From(_documents);
         HudSimulation? simulation = null;
-        if (_events is not null)
+        if (_events is not null && (_showByEvents || _events.Sends.Count > 0))
             simulation = HudSimulation.Run(_documents, _graph, _events, _localization is { } table ? table.TryGetByHash : null);
         SimulationUpdated?.Invoke(this, simulation);
 
@@ -320,6 +337,7 @@ public partial class HudCanvas : UserControl
             ActiveViewport = _activeViewport,
             ModelMesh = ChooseMesh,
             Simulation = simulation,
+            ShowByEvents = _showByEvents,
         });
         // The layout line and the guides are for one file: the active one, else the first with elements.
         var withElements = _layout.Files.Where(f => HudLayout.TopLevelElements(f.Document).Any()).ToList();
@@ -352,7 +370,7 @@ public partial class HudCanvas : UserControl
             _visuals[e.Block] = visual;
         }
 
-        if (_currentSelection is not null) DrawHighlight(_currentSelection);
+        DrawHighlights();
     }
 
     private bool IsShown(LaidOutElement e)
@@ -484,8 +502,9 @@ public partial class HudCanvas : UserControl
     private FrameworkElement? TextVisual(LaidOutElement e)
     {
         var spec = e.Spec;
-        // While simulating, a text that shows only what its events send stays empty until one does.
-        if (e.Runtime is not null && e.Text is null && spec.TextKey is null) return null;
+        // While the events decide what shows, a text that shows only what its events send stays empty
+        // until one does; otherwise it shows an example until then.
+        if (_showByEvents && e.Runtime is not null && e.Text is null && spec.TextKey is null) return null;
         if (ShownText(e) is not { } content)
             return ShowPlaceholders ? MarkerVisual(e.ToScreen, LabelFor(e) + "  (no text)") : null;
 
@@ -754,28 +773,46 @@ public partial class HudCanvas : UserControl
 
     // ---- Selection highlight -------------------------------------------------------------------------
 
-    public void HighlightBlock(HudBlock? block)
+    public void HighlightBlock(HudBlock? block) =>
+        HighlightBlocks(block is null ? Array.Empty<HudBlock>() : new[] { block }, block);
+
+    // Every selected element, outlined; the current one is also marked where its position puts it.
+    private IReadOnlyList<HudBlock> _selection = Array.Empty<HudBlock>();
+
+    /// <summary>Outline the selected elements; <paramref name="current"/> is the one the Properties panel shows.</summary>
+    public void HighlightBlocks(IReadOnlyList<HudBlock> blocks, HudBlock? current)
     {
         // Keep the click-cycle anchor in step with selections made elsewhere (tree, undo).
-        _currentSelection = block;
-        foreach (var h in _highlight) CanvasSurface.Children.Remove(h);
-        _highlight.Clear();
-        if (block is not null) DrawHighlight(block);
+        _currentSelection = current;
+        _selection = blocks;
+        DrawHighlights();
     }
 
-    /// <summary>The selected element's outline as the game draws it: its quad, text box, Rect or model.</summary>
-    private void DrawHighlight(HudBlock block)
+    private void DrawHighlights()
+    {
+        foreach (var h in _highlight) CanvasSurface.Children.Remove(h);
+        _highlight.Clear();
+        foreach (var block in _selection) DrawHighlight(block, ReferenceEquals(block, _currentSelection));
+        if (_currentSelection is { } current && !_selection.Contains(current)) DrawHighlight(current, true);
+    }
+
+    /// <summary>
+    /// A selected element's outline as the game draws it: its quad, text box, Rect or model; for the
+    /// current one, a cross where its position puts it.
+    /// </summary>
+    private void DrawHighlight(HudBlock block, bool current)
     {
         if (_layout?.Find(block) is not { } e) return;
         var ring = new Polygon
         {
-            Stroke = Brushes.White,
+            Stroke = current ? Brushes.White : new SolidColorBrush(Color.FromRgb(0x7f, 0xc3, 0xff)),
             StrokeThickness = 1.5,
             StrokeDashArray = new DoubleCollection { 3, 2 },
             IsHitTestVisible = false,
         };
         foreach (var p in OutlineOf(e)) ring.Points.Add(p);
         if (ring.Points.Count > 0) AddHighlight(ring);
+        if (!current) return;
 
         // Where its position puts it.
         var at = ToScreen(e.ToScreen, 0, 0);

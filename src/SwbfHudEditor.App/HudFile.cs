@@ -99,6 +99,19 @@ public sealed class HudFile : INotifyPropertyChanged
         }
     }
 
+    private bool _isMultiSelected;
+    /// <summary>Editor-only: one of several rows selected together in the Elements tree.</summary>
+    public bool IsMultiSelected
+    {
+        get => _isMultiSelected;
+        set
+        {
+            if (_isMultiSelected == value) return;
+            _isMultiSelected = value;
+            OnPropertyChanged();
+        }
+    }
+
     public string DisplayName => Name + (IsModified ? " *" : string.Empty);
 
     private string? _note;

@@ -44,6 +44,14 @@
         <Border DockPanel.Dock="Top" Background="#222" Padding="8,6" BorderBrush="#333" BorderThickness="0,0,0,1">
             <StackPanel>
                 <TextBlock Text="PROPERTIES" Foreground="#888" FontSize="10" Margin="0,0,0,2" />
+                <!-- A named block: its keyword, and its name to edit. Enter or leaving the box renames it. -->
+                <DockPanel x:Name="NameRow" Visibility="Collapsed">
+                    <TextBlock x:Name="KindText" DockPanel.Dock="Left" Foreground="#9aa4b1" VerticalAlignment="Center"
+                               Margin="0,0,6,0" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" />
+                    <TextBox x:Name="NameBox" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" Padding="3,1"
+                             Background="#1b2027" Foreground="#ffffff" BorderBrush="#3a4552" CaretBrush="#ffffff"
+                             KeyDown="NameBox_KeyDown" LostKeyboardFocus="NameBox_LostKeyboardFocus" />
+                </DockPanel>
                 <TextBlock x:Name="HeaderText" Text="(no selection)" Foreground="#ddd"
                            FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
                            TextTrimming="CharacterEllipsis" />

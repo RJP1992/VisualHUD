@@ -1104,6 +1104,12 @@ public partial class HudCanvas : UserControl
 
     private void ActualSize_Click(object sender, RoutedEventArgs e) => SetZoom(1.0);
 
+    private void ZoomIn_Click(object sender, RoutedEventArgs e) => SetZoom(ZoomTransform.ScaleX * 1.25);
+
+    private void ZoomOut_Click(object sender, RoutedEventArgs e) => SetZoom(ZoomTransform.ScaleX / 1.25);
+
+    private void MorePopup_Closed(object? sender, EventArgs e) => MoreButton.IsChecked = false;
+
     private void TargetCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_ready) return;
@@ -1155,8 +1161,67 @@ public partial class HudCanvas : UserControl
 
     private void Scroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
-        SetZoom(ZoomTransform.ScaleX * (e.Delta > 0 ? 1.1 : 1.0 / 1.1));
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            ZoomAt(ZoomTransform.ScaleX * (e.Delta > 0 ? 1.1 : 1.0 / 1.1), e.GetPosition(Scroller));
+            e.Handled = true;
+        }
+        else if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
+            Scroller.ScrollToHorizontalOffset(Scroller.HorizontalOffset - e.Delta);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Zoom keeping the screen point under <paramref name="at"/> (in the scroller) where it is.</summary>
+    private void ZoomAt(double scale, Point at)
+    {
+        var anchor = Scroller.TranslatePoint(at, ViewportFrame);
+        SetZoom(scale);
+        Scroller.UpdateLayout();
+        var now = ViewportFrame.TranslatePoint(anchor, Scroller);
+        Scroller.ScrollToHorizontalOffset(Scroller.HorizontalOffset + now.X - at.X);
+        Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset + now.Y - at.Y);
+    }
+
+    private Point? _panFrom;
+    private Point _panOffset;
+
+    // The middle button drags the view.
+    private void Scroller_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle || !Scroller.CaptureMouse()) return;
+        _panFrom = e.GetPosition(Scroller);
+        _panOffset = new Point(Scroller.HorizontalOffset, Scroller.VerticalOffset);
+        Scroller.Cursor = Cursors.ScrollAll;
         e.Handled = true;
+    }
+
+    private void Scroller_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_panFrom is not { } from) return;
+        var delta = e.GetPosition(Scroller) - from;
+        Scroller.ScrollToHorizontalOffset(_panOffset.X - delta.X);
+        Scroller.ScrollToVerticalOffset(_panOffset.Y - delta.Y);
+        e.Handled = true;
+    }
+
+    private void Scroller_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle || _panFrom is null) return;
+        EndPan();
+        e.Handled = true;
+    }
+
+    private void EndPan()
+    {
+        _panFrom = null;
+        Scroller.Cursor = null;
+        if (Scroller.IsMouseCaptured) Scroller.ReleaseMouseCapture();
+    }
+
+    private void Scroller_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (_panFrom is not null) EndPan();
     }
 }

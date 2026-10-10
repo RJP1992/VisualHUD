@@ -3,76 +3,44 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:views="clr-namespace:SwbfHudEditor.App.Views"
              mc:Ignorable="d"
-             Background="#1E1E1E">
-    <UserControl.Resources>
-        <!-- Compact vertical tab strip (Blender-style side tabs). Default WPF TabItem is chunky
-             and unreadable when rotated; override the template so each tab is a narrow clickable
-             pill with the tab's label running top-to-bottom. -->
-        <Style x:Key="VerticalTabItem" TargetType="TabItem">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#888" />
-            <Setter Property="Padding" Value="4,10" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter x:Name="Content" ContentSource="Header"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <ContentPresenter.LayoutTransform>
-                                    <RotateTransform Angle="-90" />
-                                </ContentPresenter.LayoutTransform>
-                            </ContentPresenter>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2c3440" />
-                                <Setter Property="Foreground" Value="#d4e8ff" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#252a30" />
-                                <Setter Property="Foreground" Value="#ddd" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </UserControl.Resources>
+             Background="{StaticResource PanelBrush}">
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="#222" Padding="8,6" BorderBrush="#333" BorderThickness="0,0,0,1">
+        <Border DockPanel.Dock="Top" Padding="12,10,12,10" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel>
-                <TextBlock Text="PROPERTIES" Foreground="#888" FontSize="10" Margin="0,0,0,2" />
+                <TextBlock Text="PROPERTIES" Style="{StaticResource Caption}" />
                 <!-- A named block: its keyword, and its name to edit. Enter or leaving the box renames it. -->
-                <DockPanel x:Name="NameRow" Visibility="Collapsed">
-                    <TextBlock x:Name="KindText" DockPanel.Dock="Left" Foreground="#9aa4b1" VerticalAlignment="Center"
-                               Margin="0,0,6,0" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" />
-                    <TextBox x:Name="NameBox" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" Padding="3,1"
-                             Background="#1b2027" Foreground="#ffffff" BorderBrush="#3a4552" CaretBrush="#ffffff"
-                             KeyDown="NameBox_KeyDown" LostKeyboardFocus="NameBox_LostKeyboardFocus" />
+                <DockPanel x:Name="NameRow" Visibility="Collapsed" Margin="0,6,0,0">
+                    <Border DockPanel.Dock="Left" CornerRadius="3" Background="{StaticResource SurfaceBrush}" Padding="7,2" Margin="0,0,8,0"
+                            VerticalAlignment="Center">
+                        <TextBlock x:Name="KindText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11.5" />
+                    </Border>
+                    <TextBox x:Name="NameBox" FontFamily="{StaticResource MonoFont}" KeyDown="NameBox_KeyDown"
+                             LostKeyboardFocus="NameBox_LostKeyboardFocus" />
                 </DockPanel>
-                <TextBlock x:Name="HeaderText" Text="(no selection)" Foreground="#ddd"
-                           FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
-                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="HeaderText" Text="Nothing selected" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0"
+                           FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </Border>
-        <TabControl TabStripPlacement="Left" Background="#1E1E1E" BorderThickness="0" Padding="0">
-            <TabItem Header="EDIT" Style="{StaticResource VerticalTabItem}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              Background="#1E1E1E" BorderThickness="0">
-                    <StackPanel x:Name="Rows" Margin="6" />
+        <TabControl x:Name="Tabs">
+            <TabItem Header="Properties">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="Rows" Margin="10,4,10,12" />
                 </ScrollViewer>
             </TabItem>
-            <TabItem Header="ADD" Style="{StaticResource VerticalTabItem}">
-                <DockPanel Background="#1E1E1E">
-                    <TextBlock DockPanel.Dock="Top" Text="What the game reads for the selected block, less what it already has. Click one to add it with a starting value."
-                               Foreground="#888" FontSize="11" TextWrapping="Wrap" Margin="8,8,8,4" />
-                    <TextBox x:Name="AddFilter" DockPanel.Dock="Top" Margin="8,0,8,4" TextChanged="AddFilter_TextChanged"
-                             ToolTip="Show the properties whose name or description contains this." />
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                                  Background="#1E1E1E" BorderThickness="0">
-                        <StackPanel x:Name="AddRows" Margin="6" />
+            <TabItem Header="Add">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="What the game reads for the selected block, less what it has. Click one to add it with a starting value."
+                               Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="12,10,12,6" />
+                    <Grid DockPanel.Dock="Top" Margin="12,0,12,6">
+                        <TextBox x:Name="AddFilter" Padding="24,3,6,3" TextChanged="AddFilter_TextChanged"
+                                 ToolTip="Show the properties whose name or description contains this." />
+                        <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="11" HorizontalAlignment="Left" Margin="8,0,0,0"
+                                   Foreground="{StaticResource TextMutedBrush}" IsHitTestVisible="False" />
+                    </Grid>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="AddRows" Margin="10,0,10,12" />
                     </ScrollViewer>
                 </DockPanel>
             </TabItem>

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using SwbfHudEditor.Core.Edits;
@@ -8,7 +9,14 @@ using SwbfHudEditor.Core.Hud;
 
 namespace SwbfHudEditor.App.Views;
 
-public sealed record PropertyEditedEventArgs(HudBlock Leaf, int ArgIndex, HudArgument OldArg, HudArgument NewArg, HudBlock? SelectedBlock);
+/// <summary>One argument of a line, changed from <see cref="Old"/> to <see cref="New"/>.</summary>
+public sealed record ArgChange(int Index, HudArgument Old, HudArgument New);
+
+/// <summary>
+/// Fired when arguments of a line were edited in the panel (they are already changed): the host makes
+/// one undoable edit of them. A colour picked is its three arguments at once.
+/// </summary>
+public sealed record PropertyEditedEventArgs(HudBlock Leaf, IReadOnlyList<ArgChange> Changes, HudBlock? SelectedBlock);
 
 /// <summary>Fired when the user clicks an "Add" tab button to insert a property as a child of
 /// <see cref="Target"/>. Carries the already-built leaf <see cref="Property"/> so the host can
@@ -22,19 +30,28 @@ public sealed record PropertyDeleteRequestedEventArgs(HudBlock Target, HudBlock 
 /// <summary>Fired by the name box in the header: rename <see cref="Block"/> to <see cref="NewName"/>.</summary>
 public sealed record RenameRequestedEventArgs(HudBlock Block, string NewName);
 
+/// <summary>
+/// The selected block's lines, grouped as the Add tab groups what the game reads, each argument with
+/// an editor for what it takes: a name from a list, a flag, a colour, an event, a number or text.
+/// </summary>
 public partial class PropertyPanel : UserControl
 {
-    private static readonly FontFamily MonoFont = new("Consolas, Cascadia Mono, Menlo, monospace");
-    private static readonly Brush NameBrush = new SolidColorBrush(Color.FromRgb(180, 200, 240));
-    private static readonly Brush DefaultLineBrush = new SolidColorBrush(Color.FromRgb(120, 128, 140));
     private HudBlock? _block;
     private readonly List<(HudBlock Leaf, TextBlock Label)> _nameLabels = new();
+    // Sections closed by the user stay closed for the session.
+    private static readonly HashSet<string> ClosedSections = new(StringComparer.Ordinal);
 
     /// <summary>Whether a line only restates the engine's default, so saving leaves it out. Set by the host.</summary>
     public Func<HudBlock, bool>? IsDefaultLine { get; set; }
 
     /// <summary>The block holding a block, which tells what a template reads. Set by the host.</summary>
     public Func<HudBlock, HudBlock?>? ParentOf { get; set; }
+
+    /// <summary>The events the HUD knows, offered for an event argument. Set by the host.</summary>
+    public Func<IReadOnlyList<string>>? KnownEvents { get; set; }
+
+    /// <summary>Called while a colour is being picked, before it is committed, to redraw the canvas.</summary>
+    public Action? Preview { get; set; }
 
     public event EventHandler<PropertyEditedEventArgs>? PropertyEdited;
     public event EventHandler<PropertyInsertRequestedEventArgs>? PropertyInsertRequested;
@@ -46,6 +63,8 @@ public partial class PropertyPanel : UserControl
         InitializeComponent();
     }
 
+    private Brush Res(string key) => (Brush)FindResource(key);
+
     public void SetBlock(HudBlock? block)
     {
         // A name typed and not yet committed belongs to the block shown so far: selecting another
@@ -54,6 +73,24 @@ public partial class PropertyPanel : UserControl
         _block = block;
         Rebuild();
     }
+
+    /// <summary>Mark again the rows whose line restates a default, after an edit.</summary>
+    public void RefreshDefaultMarks()
+    {
+        foreach (var (leaf, label) in _nameLabels) MarkDefault(leaf, label);
+    }
+
+    private void MarkDefault(HudBlock leaf, TextBlock label)
+    {
+        var isDefault = IsDefaultLine?.Invoke(leaf) == true;
+        label.Foreground = isDefault ? Res("TextMutedBrush") : Res("TextSecondaryBrush");
+        label.FontStyle = isDefault ? FontStyles.Italic : FontStyles.Normal;
+        var description = _block is null ? null : PropertyCatalog.Find(_block, ParentOf?.Invoke(_block), leaf.Name)?.Description;
+        label.ToolTip = (description is null ? leaf.Name : $"{leaf.Name}: {description}") +
+                        (isDefault ? "\n\nThis is the engine's default: saving leaves this line out." : string.Empty);
+    }
+
+    // ── Header ───────────────────────────────────────────────────────────────────────
 
     /// <summary>Show the block's name again, after a rename elsewhere or one that was refused.</summary>
     public void RefreshHeader()
@@ -101,20 +138,6 @@ public partial class PropertyPanel : UserControl
         RenameRequested?.Invoke(this, new RenameRequestedEventArgs(_block, NameBox.Text));
     }
 
-    /// <summary>Mark again the rows whose line restates a default, after an edit.</summary>
-    public void RefreshDefaultMarks()
-    {
-        foreach (var (leaf, label) in _nameLabels) MarkDefault(leaf, label);
-    }
-
-    private void MarkDefault(HudBlock leaf, TextBlock label)
-    {
-        var isDefault = IsDefaultLine?.Invoke(leaf) == true;
-        label.Foreground = isDefault ? DefaultLineBrush : NameBrush;
-        label.FontStyle = isDefault ? FontStyles.Italic : FontStyles.Normal;
-        label.ToolTip = isDefault ? $"{leaf.Name} here is the engine's default: saving leaves this line out." : leaf.Name;
-    }
-
     private void Rebuild()
     {
         Rows.Children.Clear();
@@ -124,51 +147,336 @@ public partial class PropertyPanel : UserControl
         {
             NameRow.Visibility = Visibility.Collapsed;
             HeaderText.Visibility = Visibility.Visible;
-            HeaderText.Text = "(no selection)";
-            AddRows.Children.Add(HintText("Select an element in the tree or canvas to see its properties."));
+            HeaderText.Text = "Nothing selected";
+            Rows.Children.Add(Hint("Select an element in the tree or on the canvas to see its properties."));
+            AddRows.Children.Add(Hint("Select an element in the tree or on the canvas to see its properties."));
             return;
         }
-
         RefreshHeader();
-
         RebuildEditTab();
         RebuildAddTab();
     }
 
+    // ── The lines ────────────────────────────────────────────────────────────────────
+
     private void RebuildEditTab()
     {
         if (_block is null) return;
-
+        var parent = ParentOf?.Invoke(_block);
         var leaves = _block.Children.Where(c => !c.HasBody).ToList();
-        if (leaves.Count == 0)
+        if (leaves.Count == 0) Rows.Children.Add(Hint("No lines yet: add what this block should read from the Add tab."));
+
+        var groups = leaves
+            .GroupBy(l => PropertyCatalog.Find(_block, parent, l.Name)?.Group ?? "Other")
+            .OrderBy(g => PropertyCatalog.Groups.ToList().IndexOf(g.Key) is var i and >= 0 ? i : int.MaxValue);
+        foreach (var group in groups)
         {
-            Rows.Children.Add(new TextBlock
+            var body = new StackPanel { Margin = new Thickness(0, 0, 0, 4) };
+            foreach (var leaf in group) body.Children.Add(BuildRow(leaf));
+            var section = new Expander
             {
-                Text = "(no editable properties on this element)",
-                Foreground = Brushes.Gray,
-                FontStyle = FontStyles.Italic,
-                Margin = new Thickness(4, 8, 4, 4),
-            });
-        }
-        else
-        {
-            foreach (var leaf in leaves)
-                Rows.Children.Add(BuildRow(leaf));
+                Style = (Style)FindResource("SectionExpander"),
+                Header = new TextBlock { Text = group.Key.ToUpperInvariant(), Style = (Style)FindResource("Caption") },
+                Content = body,
+                IsExpanded = !ClosedSections.Contains(group.Key),
+            };
+            var key = group.Key;
+            section.Collapsed += (_, _) => ClosedSections.Add(key);
+            section.Expanded += (_, _) => ClosedSections.Remove(key);
+            Rows.Children.Add(section);
         }
 
         var nested = _block.Children.Count(c => c.HasBody);
         if (nested > 0)
+            Rows.Children.Add(Hint($"+ {nested} block{(nested == 1 ? "" : "s")} inside, in the Elements tree."));
+    }
+
+    /// <summary>A line: its name, an editor for each argument, and a button that removes it.</summary>
+    private FrameworkElement BuildRow(HudBlock leaf)
+    {
+        var row = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var label = new TextBlock
         {
-            Rows.Children.Add(new TextBlock
+            Text = leaf.Name,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(2, 0, 6, 0),
+        };
+        MarkDefault(leaf, label);
+        _nameLabels.Add((leaf, label));
+        row.Children.Add(label);
+
+        var editors = BuildEditors(leaf);
+        Grid.SetColumn(editors, 1);
+        row.Children.Add(editors);
+
+        var delete = new Button
+        {
+            Style = (Style)FindResource("ToolButton"),
+            Content = new TextBlock { Text = "", Style = (Style)FindResource("Icon"), FontSize = 10 },
+            MinWidth = 22,
+            MinHeight = 22,
+            Padding = new Thickness(3),
+            Margin = new Thickness(4, 0, 0, 0),
+            ToolTip = $"Remove {leaf.Name} from this element",
+            Tag = leaf,
+            Opacity = 0.55,
+        };
+        delete.Click += Delete_Click;
+        Grid.SetColumn(delete, 2);
+        row.Children.Add(delete);
+        return row;
+    }
+
+    /// <summary>The editors of a line's arguments: one that fills the row, or several side by side.</summary>
+    private FrameworkElement BuildEditors(HudBlock leaf)
+    {
+        if (PropertyArguments.IsFlag(leaf.Name) && leaf.Arguments.Count == 1 && IsNumberLike(leaf.Arguments[0]))
+            return FlagEditor(leaf);
+
+        if (leaf.Arguments.Count == 1)
+        {
+            var single = ArgEditor(leaf, 0);
+            single.HorizontalAlignment = HorizontalAlignment.Stretch;
+            if (single is FrameworkElement { } box) box.Width = double.NaN;
+            return single;
+        }
+
+        var panel = new WrapPanel { Orientation = Orientation.Horizontal };
+        var colorAt = PropertyArguments.ColorStart(leaf.Name);
+        for (var i = 0; i < leaf.Arguments.Count; i++)
+        {
+            if (colorAt == i && i + 2 < leaf.Arguments.Count) panel.Children.Add(ColorSwatch(leaf, i));
+            panel.Children.Add(ArgEditor(leaf, i));
+        }
+        return panel;
+    }
+
+    private static bool IsNumberLike(HudArgument arg) =>
+        arg.Kind is HudArgKind.Integer or HudArgKind.Float ||
+        arg.Kind == HudArgKind.Identifier && (arg.Raw.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                                              arg.Raw.Equals("false", StringComparison.OrdinalIgnoreCase));
+
+    private FrameworkElement ArgEditor(HudBlock leaf, int index)
+    {
+        var arg = leaf.Arguments[index];
+        var tip = PropertyArguments.NameOf(leaf.Name, index) ?? $"argument {index + 1}";
+        var choices = arg.Kind == HudArgKind.String ? PropertyArguments.Choices(leaf.Name, index, _block?.Name) : null;
+        if (choices is null && arg.Kind == HudArgKind.String && PropertyArguments.IsEvent(leaf.Name, index) && KnownEvents is not null)
+            choices = KnownEvents();
+        if (choices is not null)
+        {
+            var combo = new ComboBox
             {
-                Text = $"+ {nested} nested block{(nested == 1 ? "" : "s")} (see the Elements tree)",
-                Foreground = Brushes.Gray,
-                FontStyle = FontStyles.Italic,
-                Margin = new Thickness(4, 12, 4, 0),
-                FontSize = 11,
-            });
+                IsEditable = true,
+                ItemsSource = choices,
+                Text = arg.Raw,
+                Width = 118,
+                Margin = new Thickness(0, 1, 4, 1),
+                ToolTip = tip,
+                Tag = (leaf, index),
+                FontFamily = (FontFamily)FindResource("MonoFont"),
+                IsTextSearchEnabled = true,
+                StaysOpenOnEdit = true,
+            };
+            combo.SelectionChanged += (_, e) =>
+            {
+                if (e.AddedItems.Count > 0 && e.AddedItems[0] is string picked) Commit(leaf, index, picked);
+            };
+            combo.LostKeyboardFocus += (_, _) =>
+            {
+                if (!combo.IsKeyboardFocusWithin) Commit(leaf, index, combo.Text);
+            };
+            combo.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    Commit(leaf, index, combo.Text);
+                    e.Handled = true;
+                }
+            };
+            return combo;
+        }
+
+        var box = new TextBox
+        {
+            Text = arg.Raw,
+            FontFamily = (FontFamily)FindResource("MonoFont"),
+            Width = arg.Kind == HudArgKind.String ? 150 : 66,
+            Margin = new Thickness(0, 1, 4, 1),
+            ToolTip = arg.Kind is HudArgKind.Integer or HudArgKind.Float ? $"{tip}: Up and Down change it (Shift by more, Ctrl by less)" : tip,
+            Tag = (leaf, index),
+        };
+        box.LostFocus += (_, _) => Commit(leaf, index, box.Text);
+        box.PreviewKeyDown += (_, e) => Arg_KeyDown(box, leaf, index, e);
+        return box;
+    }
+
+    private void Arg_KeyDown(TextBox box, HudBlock leaf, int index, KeyEventArgs e)
+    {
+        var current = leaf.Arguments[index];
+        switch (e.Key)
+        {
+            case Key.Enter:
+                Commit(leaf, index, box.Text);
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                box.Text = current.Raw;
+                e.Handled = true;
+                break;
+            case Key.Up or Key.Down when current.Kind is HudArgKind.Integer or HudArgKind.Float &&
+                                         double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value):
+                var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+                var ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+                var step = current.Kind == HudArgKind.Integer ? (shift ? 10 : 1) : shift ? 0.1 : ctrl ? 0.001 : 0.01;
+                value += e.Key == Key.Up ? step : -step;
+                box.Text = current.Kind == HudArgKind.Integer
+                    ? ((long)Math.Round(value)).ToString(CultureInfo.InvariantCulture)
+                    : HudArgument.FromFloat(value).Raw;
+                Commit(leaf, index, box.Text);
+                box.CaretIndex = box.Text.Length;
+                e.Handled = true;
+                break;
         }
     }
+
+    /// <summary>A 0/1 line as a switch, written as the line had it: 1/0, 1.000000/0.000000 or true/false.</summary>
+    private FrameworkElement FlagEditor(HudBlock leaf)
+    {
+        var arg = leaf.Arguments[0];
+        var on = arg.Kind == HudArgKind.Identifier ? arg.Raw.Equals("true", StringComparison.OrdinalIgnoreCase)
+            : double.TryParse(arg.Raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v != 0;
+        var check = new CheckBox
+        {
+            IsChecked = on,
+            Content = on ? "On" : "Off",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 2, 0, 2),
+        };
+        check.Click += (_, _) =>
+        {
+            var now = check.IsChecked == true;
+            check.Content = now ? "On" : "Off";
+            var raw = arg.Kind switch
+            {
+                HudArgKind.Identifier => now ? "true" : "false",
+                HudArgKind.Float => HudArgument.FromFloat(now ? 1 : 0).Raw,
+                _ => now ? "1" : "0",
+            };
+            Commit(leaf, 0, raw);
+        };
+        return check;
+    }
+
+    /// <summary>A swatch of the line's colour; a click opens a picker that previews as it goes and commits once.</summary>
+    private FrameworkElement ColorSwatch(HudBlock leaf, int start)
+    {
+        var swatch = new Button
+        {
+            Width = 26,
+            Height = 22,
+            Margin = new Thickness(0, 1, 6, 1),
+            Padding = new Thickness(0),
+            ToolTip = "Pick the colour",
+            BorderBrush = Res("BorderStrongBrush"),
+            Background = new SolidColorBrush(ColorOf(leaf, start)),
+        };
+        swatch.Click += (_, _) =>
+        {
+            var before = new[] { leaf.Arguments[start], leaf.Arguments[start + 1], leaf.Arguments[start + 2] };
+            var picker = new ColorPicker();
+            var popup = new Popup
+            {
+                PlacementTarget = swatch,
+                Placement = PlacementMode.Bottom,
+                StaysOpen = false,
+                AllowsTransparency = true,
+                PopupAnimation = PopupAnimation.Fade,
+                Child = new Border
+                {
+                    Background = Res("ElevatedBrush"),
+                    BorderBrush = Res("BorderStrongBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(10),
+                    Margin = new Thickness(0, 4, 0, 0),
+                    Child = picker,
+                },
+            };
+            picker.Color = ColorOf(leaf, start);
+            picker.ColorChanged += (_, c) =>
+            {
+                SetColor(leaf, start, c);
+                swatch.Background = new SolidColorBrush(c);
+                Preview?.Invoke();
+            };
+            popup.Closed += (_, _) =>
+            {
+                var changes = Enumerable.Range(0, 3)
+                    .Where(i => leaf.Arguments[start + i] != before[i])
+                    .Select(i => new ArgChange(start + i, before[i], leaf.Arguments[start + i]))
+                    .ToList();
+                if (changes.Count > 0) PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, changes, _block));
+                Rebuild();
+            };
+            popup.IsOpen = true;
+        };
+        return swatch;
+    }
+
+    private static Color ColorOf(HudBlock leaf, int start)
+    {
+        byte Channel(int i) => double.TryParse(leaf.Arguments[start + i].Raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
+            ? (byte)Math.Clamp(Math.Round(v), 0, 255)
+            : (byte)255;
+        return Color.FromRgb(Channel(0), Channel(1), Channel(2));
+    }
+
+    /// <summary>The colour's channels as whole numbers, in the kind the line had them.</summary>
+    private static void SetColor(HudBlock leaf, int start, Color c)
+    {
+        var channels = new[] { c.R, c.G, c.B };
+        for (var i = 0; i < 3; i++)
+        {
+            var old = leaf.Arguments[start + i];
+            leaf.Arguments[start + i] = old.Kind == HudArgKind.Float
+                ? HudArgument.FromFloat(channels[i])
+                : HudArgument.FromInt(channels[i]);
+        }
+    }
+
+    /// <summary>Change one argument, if the text is one its kind takes, and tell the host.</summary>
+    private void Commit(HudBlock leaf, int index, string text)
+    {
+        var current = leaf.Arguments[index];
+        if (text == current.Raw) return;
+        if (!IsValidForKind(text, current.Kind)) return;
+        var changed = current with { Raw = text };
+        leaf.Arguments[index] = changed;
+        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, new[] { new ArgChange(index, current, changed) }, _block));
+    }
+
+    private static bool IsValidForKind(string text, HudArgKind kind) => kind switch
+    {
+        HudArgKind.Integer => long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
+        HudArgKind.Float => double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _),
+        HudArgKind.String => !text.Contains('"') && !text.Contains('\n'),
+        HudArgKind.Identifier => !string.IsNullOrWhiteSpace(text) && (char.IsLetter(text[0]) || text[0] == '_'),
+        _ => true,
+    };
+
+    private void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: HudBlock leaf } && _block is not null)
+            PropertyDeleteRequested?.Invoke(this, new PropertyDeleteRequestedEventArgs(_block, leaf));
+    }
+
+    // ── The Add tab ──────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Fill the "Add" tab: what the game reads for this block and it does not have yet, under
@@ -185,7 +493,7 @@ public partial class PropertyPanel : UserControl
             .ToList();
         if (addable.Count == 0)
         {
-            AddRows.Children.Add(HintText(filter.Length > 0
+            AddRows.Children.Add(Hint(filter.Length > 0
                 ? $"Nothing {_block.Name} can take matches \"{filter}\"."
                 : $"{_block.Name} already has everything the game reads for it, or the game reads nothing more here."));
             return;
@@ -200,10 +508,8 @@ public partial class PropertyPanel : UserControl
                 AddRows.Children.Add(new TextBlock
                 {
                     Text = group.ToUpperInvariant(),
-                    Foreground = new SolidColorBrush(Color.FromRgb(143, 184, 222)),
-                    FontSize = 10,
-                    FontWeight = FontWeights.SemiBold,
-                    Margin = new Thickness(2, AddRows.Children.Count == 0 ? 2 : 10, 0, 4),
+                    Style = (Style)FindResource("Caption"),
+                    Margin = new Thickness(2, AddRows.Children.Count == 0 ? 6 : 14, 0, 6),
                 });
             }
             AddRows.Children.Add(BuildAddButton(def));
@@ -217,53 +523,42 @@ public partial class PropertyPanel : UserControl
         RebuildAddTab();
     }
 
-    /// <summary>One button in the "Add" tab: bold name on top, gray description below, click to add.</summary>
+    /// <summary>One button in the "Add" tab: the name on top, what it does below, click to add.</summary>
     private FrameworkElement BuildAddButton(PropertyCatalog.PropertyDef def)
     {
-        var title = new TextBlock
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
         {
             Text = def.IsBlock ? def.Name + " { }" : def.Name,
-            Foreground = new SolidColorBrush(Color.FromRgb(212, 232, 255)),
-            FontFamily = MonoFont,
-            FontWeight = FontWeights.SemiBold,
-        };
-        var desc = new TextBlock
+            Foreground = Res("CodeBrush"),
+            FontFamily = (FontFamily)FindResource("MonoFont"),
+        });
+        panel.Children.Add(new TextBlock
         {
             Text = def.Description,
-            Foreground = new SolidColorBrush(Color.FromRgb(136, 136, 136)),
-            FontSize = 10,
+            Foreground = Res("TextMutedBrush"),
+            FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 2, 0, 0),
-        };
-        var panel = new StackPanel();
-        panel.Children.Add(title);
-        panel.Children.Add(desc);
-
-        var btn = new Button
+        });
+        var button = new Button
         {
             Content = panel,
             HorizontalContentAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 0, 0, 4),
-            Padding = new Thickness(8, 6, 8, 6),
-            Background = new SolidColorBrush(Color.FromRgb(44, 52, 64)),
-            Foreground = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(64, 64, 64)),
-            BorderThickness = new Thickness(1),
+            Padding = new Thickness(10, 6, 10, 7),
             Cursor = Cursors.Hand,
             ToolTip = def.IsBlock ? $"Add a {def.Name} block to the selected element." : $"Add {def.Name}(...) to the selected element.",
             Tag = def,
         };
-        btn.Click += AddButton_Click;
-        return btn;
+        button.Click += AddButton_Click;
+        return button;
     }
 
     private void AddButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button btn || btn.Tag is not PropertyCatalog.PropertyDef def) return;
-        if (_block is null) return;
-
-        // Build a fresh instance every click — the factory returns a new HudBlock so repeated
-        // Add-then-Undo-then-Add cycles don't reuse the same object (which would confuse undo).
+        if (sender is not Button { Tag: PropertyCatalog.PropertyDef def } || _block is null) return;
+        // Build a fresh instance every click: repeated Add-then-Undo-then-Add must not reuse one block.
         var newProp = def.Factory();
         // Another row of a table, such as NumberColor, starts as a copy of the table's last row.
         var last = def.Repeatable && !def.IsBlock
@@ -273,138 +568,13 @@ public partial class PropertyPanel : UserControl
         PropertyInsertRequested?.Invoke(this, new PropertyInsertRequestedEventArgs(_block, newProp, CopiedLast: last is not null));
     }
 
-    private static TextBlock HintText(string text) => new()
+    private TextBlock Hint(string text) => new()
     {
         Text = text,
-        Foreground = Brushes.Gray,
+        Foreground = Res("TextMutedBrush"),
         FontStyle = FontStyles.Italic,
-        FontSize = 11,
+        FontSize = 11.5,
         TextWrapping = TextWrapping.Wrap,
-        Margin = new Thickness(4, 8, 4, 4),
-    };
-
-    private FrameworkElement BuildRow(HudBlock leaf)
-    {
-        var row = new Grid { Margin = new Thickness(0, 1, 0, 1) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-
-        var delete = new Button
-        {
-            Content = "×",
-            Width = 18,
-            Margin = new Thickness(0, 0, 4, 0),
-            Padding = new Thickness(0),
-            VerticalAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Color.FromRgb(44, 52, 64)),
-            Foreground = new SolidColorBrush(Color.FromRgb(220, 120, 120)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(64, 64, 64)),
-            ToolTip = $"Remove {leaf.Name} from this element",
-            Tag = leaf,
-        };
-        delete.Click += Delete_Click;
-        Grid.SetColumn(delete, 0);
-        row.Children.Add(delete);
-
-        var nameLabel = new TextBlock
-        {
-            Text = leaf.Name,
-            FontFamily = MonoFont,
-            VerticalAlignment = VerticalAlignment.Center,
-            Padding = new Thickness(4, 4, 4, 4),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        };
-        MarkDefault(leaf, nameLabel);
-        _nameLabels.Add((leaf, nameLabel));
-        Grid.SetColumn(nameLabel, 1);
-        row.Children.Add(nameLabel);
-
-        var argPanel = new StackPanel { Orientation = Orientation.Horizontal };
-        for (var i = 0; i < leaf.Arguments.Count; i++)
-        {
-            var index = i;
-            var arg = leaf.Arguments[index];
-            var box = new TextBox
-            {
-                Text = arg.Raw,
-                FontFamily = MonoFont,
-                Width = arg.Kind == HudArgKind.String ? 140 : 70,
-                Margin = new Thickness(0, 0, 4, 0),
-                Padding = new Thickness(3, 2, 3, 2),
-                Background = ColorForKind(arg.Kind),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(64, 64, 64)),
-                Tag = (leaf, index),
-            };
-            box.LostFocus += Arg_LostFocus;
-            box.KeyDown += Arg_KeyDown;
-            argPanel.Children.Add(box);
-        }
-        Grid.SetColumn(argPanel, 2);
-        row.Children.Add(argPanel);
-
-        return row;
-    }
-
-    private void Delete_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: HudBlock leaf } && _block is not null)
-            PropertyDeleteRequested?.Invoke(this, new PropertyDeleteRequestedEventArgs(_block, leaf));
-    }
-
-    private void Arg_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter && sender is TextBox box)
-        {
-            CommitEdit(box);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && sender is TextBox b2 && b2.Tag is ValueTuple<HudBlock, int> t)
-        {
-            b2.Text = t.Item1.Arguments[t.Item2].Raw;
-            e.Handled = true;
-        }
-    }
-
-    private void Arg_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is TextBox box) CommitEdit(box);
-    }
-
-    private void CommitEdit(TextBox box)
-    {
-        if (box.Tag is not ValueTuple<HudBlock, int> tag) return;
-        var (leaf, index) = tag;
-        var current = leaf.Arguments[index];
-        if (box.Text == current.Raw) return;
-
-        if (!IsValidForKind(box.Text, current.Kind))
-        {
-            box.Text = current.Raw;
-            return;
-        }
-
-        var newArg = current with { Raw = box.Text };
-        leaf.Arguments[index] = newArg;
-        PropertyEdited?.Invoke(this, new PropertyEditedEventArgs(leaf, index, current, newArg, _block));
-    }
-
-    private static bool IsValidForKind(string text, HudArgKind kind) => kind switch
-    {
-        HudArgKind.Integer => long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
-        HudArgKind.Float => double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _),
-        HudArgKind.String => true,
-        HudArgKind.Identifier => !string.IsNullOrWhiteSpace(text) && (char.IsLetter(text[0]) || text[0] == '_'),
-        _ => true,
-    };
-
-    private static Brush ColorForKind(HudArgKind kind) => kind switch
-    {
-        HudArgKind.String => new SolidColorBrush(Color.FromRgb(40, 40, 50)),
-        HudArgKind.Integer => new SolidColorBrush(Color.FromRgb(40, 50, 40)),
-        HudArgKind.Float => new SolidColorBrush(Color.FromRgb(50, 45, 40)),
-        HudArgKind.Identifier => new SolidColorBrush(Color.FromRgb(50, 40, 50)),
-        _ => Brushes.Black,
+        Margin = new Thickness(4, 10, 4, 4),
     };
 }

@@ -32,6 +32,9 @@ A HUD is usually several `.hud` files: the game loads the stock transforms and H
 a mod can load more. They load additively, into the same screen groups, and each is laid out
 by its own `FileInfo`. The editor works on such a set:
 
+- **File > New HUD file** (Ctrl+N) writes a new file with its `FileInfo` and one viewport, in
+  the folder you pick, laid out the stock way, with `TrueWidescreen`, or with
+  `AuthoredRatio(w, h)`. It opens on its own, or is added to the HUD already open.
 - **File > Open** takes one file or several, loaded in name order; **Add HUD file** loads
   more after them; **Remove file from HUD** takes the selection's file out (the file on disk
   is not changed). Several files on the command line load in that order.
@@ -92,17 +95,24 @@ one's for the same key.
 - **Screen**: the resolution the game draws at. With Shader Patch's display scaling that is
   the resolution the game sees (1280×720 on a 4K screen at 150%), and it decides how big a
   `"Pixels"` value is.
-- **Viewport**: whose screen group to show.
-- **Unit snapping**: the stock draw snaps every element to 1/640 of the width; GameExt's
+- **View**: whose screen group to show.
+- **Snap**: the stock draw snaps every element to 1/640 of the width; GameExt's
   `HudSubPixel` (on by default) does not. Switching game resets it.
+- **Outlines** marks what draws nothing here: a missing texture, a bitmap without a
+  `BitmapRect`, the box of an element the game draws in code.
 - **Guides**: the band the stock game squashes the HUD into on a wide screen, or, for a
   file GameExt lays out, the thirds of its layout and where each lands.
-- **HUD scale** resizes `Scalable(1)` elements, as the game's video option does.
-- **Model size** tunes the estimated size of `Model3D` meshes.
+- **Hidden** draws faintly what the game's showing and hiding keeps hidden (see
+  [Events](#events)).
+- The ⚙ button holds **HUD scale**, which resizes `Scalable(1)` elements as the game's video
+  option does, and **Model size**, which tunes the size of `Model3D` meshes.
 - **Reference** shows an image loaded with **File > Load reference image** (PNG, JPEG, BMP
   or TGA), such as a screenshot or a mock-up, stretched across the screen under the HUD, or
   **On top** of it, at the slider's opacity. It is remembered between sessions and never
   saved into a `.hud` file, so a HUD needs no reference element of its own.
+- Ctrl+wheel zooms at the mouse, Shift+wheel scrolls sideways, and the middle button drags the
+  view. The buttons on the right zoom, fit the screen in the view, or show it at one pixel per
+  pixel.
 
 ## Editing
 
@@ -129,6 +139,22 @@ one's for the same key.
   and a list keep their names, as the game finds them by keyword.
 - Dragging an element changes its last `Position` line, in that line's own mode, through the
   inverse of the matrix the game draws it with.
+- **Cut**, **Copy** and **Paste** (Ctrl+X, C, V) carry blocks as `.hud` text, so they also go to
+  and come from a text editor or another copy of the editor. Pasted blocks go inside the selected
+  element when it can hold them, else after it; lines of text paste into the selected block, a
+  line it has once replaced. **Duplicate** (Ctrl+D) copies the selection right after itself.
+  Copies get names of their own (`name_1`, `name_2`), elements and transforms alike, and so do
+  the events an `EventOutput` sends; templates keep theirs.
+- **Move up** and **Move down** (Alt+Up, Alt+Down) move the selection among its neighbours.
+  Dragging rows in the tree moves them before, after or into another row, between files too;
+  the marker shows where they will go, and a row that cannot go there is refused with the reason
+  in the status bar. Comments move with their block, re-indented.
+- Each of these, whatever it touches, is one undo step (Ctrl+Z, Ctrl+Y).
+- The box above the tree filters it: the rows whose name or keyword contains the text, and the
+  rows that hold them.
+- In the Properties panel, a colour is a swatch that opens a picker and shows the change as you
+  pick; a mode, an alignment, a style, a font or an event is a list, which takes typing too; an
+  on/off line is a switch. Up and Down step a number (Shift for ten times or 0.1, Ctrl for 0.001).
 - The Properties panel's **Add** tab offers every key the game reads for the selected block, by
   the class that reads it (an element's own, its group base, every element's) and GameExt's,
   grouped and with a filter. A template such as `MeshInfo`, `Segment` or a Target template gets
@@ -216,6 +242,10 @@ Errors are written to `out.png.error.txt`.
 ```bash
 VisualHUD.exe --snapshot 1playerhud.hud out.png --preset onfoot --send player1.healthFraction=0.3
 ```
+
+`--ui-snapshot out.png file.hud...` draws the whole editor window instead, off the screen, with
+`--ui-size WxH`, `--ui-select name` and `--ui-left elements|events|assets`, to check the interface
+without showing it.
 
 ## Credits
 

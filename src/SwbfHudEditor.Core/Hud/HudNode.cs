@@ -43,11 +43,31 @@ public sealed class HudBlock : INotifyPropertyChanged
         }
     }
 
-    /// <summary>The block's line as the Elements tree shows it, <c>Name("text", 1) { ... }</c>.</summary>
+    private bool _isFilteredOut;
+    /// <summary>Editor-only: the Elements tree's filter leaves this row out. Not serialized.</summary>
+    public bool IsFilteredOut
+    {
+        get => _isFilteredOut;
+        set
+        {
+            if (_isFilteredOut == value) return;
+            _isFilteredOut = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>The block's line as written, <c>Name("text", 1) { ... }</c>.</summary>
     public string Header => ToString();
 
+    /// <summary>The name in the block's first argument, as the Elements tree shows it; empty without one.</summary>
+    public string ItemName => Arguments.Count > 0 && Arguments[0].Kind == HudArgKind.String ? Arguments[0].Raw : string.Empty;
+
     /// <summary>Tell bindings an argument changed, such as a rename: <see cref="Arguments"/> is a plain list.</summary>
-    public void NotifyArgumentsChanged() => OnPropertyChanged(nameof(Header));
+    public void NotifyArgumentsChanged()
+    {
+        OnPropertyChanged(nameof(Header));
+        OnPropertyChanged(nameof(ItemName));
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
@@ -121,6 +141,12 @@ public sealed class HudTrivia
 
     /// <summary>A comment after the closing brace.</summary>
     public string? AfterClose { get; set; }
+
+    /// <summary>
+    /// Write the comment lines at the block's depth: the block was moved or pasted somewhere else,
+    /// and their own indentation was for where they were.
+    /// </summary>
+    public bool Reindent { get; set; }
 
     /// <summary>Whether any comment is attached, not only blank lines.</summary>
     public bool HasComments =>

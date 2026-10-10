@@ -65,9 +65,12 @@ public partial class MainWindow : Window
         BuildInsertMenu(EditInsertAfter, inside: false);
         BuildInsertMenu(TreeInsertInside, inside: true);
         BuildInsertMenu(TreeInsertAfter, inside: false);
+        BuildInsertMenu(ToolbarInsertMenu, inside: true);
         Canvas.DocumentVisible = doc => FileOf(doc)?.IsVisible ?? true;
         Properties.IsDefaultLine = line => (_defaultLines ??= FindDefaultLines()).Contains(line);
         Properties.ParentOf = block => Locate(block) is { Path: { Count: > 1 } path } ? path[^2] : null;
+        Properties.KnownEvents = KnownEvents;
+        Properties.Preview = () => Canvas.Refresh();
         _undo.Changed += (_, _) =>
         {
             _defaultLines = null;
@@ -235,15 +238,51 @@ public partial class MainWindow : Window
     private void Save_CanExecute(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _files.Count > 0;
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>The files to open as the window loads; null opens the ones on the command line.</summary>
+    internal IReadOnlyList<string>? StartupFiles { get; init; }
+
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        var paths = Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToList();
+        var paths = (StartupFiles ?? Environment.GetCommandLineArgs().Skip(1).ToList()).Where(File.Exists).ToList();
         if (paths.Count > 0) LoadFiles(paths);
     }
 
+    /// <summary>Select an element by name in the tree, as a click on its row would.</summary>
+    internal bool SelectByName(string name)
+    {
+        foreach (var file in _files)
+            foreach (var block in AllBlocks(file.Document.TopLevel))
+                if (block.HasBody && string.Equals(FirstName(block), name, StringComparison.OrdinalIgnoreCase) &&
+                    Locate(block) is { } at)
+                {
+                    SelectPath(at.File, at.Path);
+                    return true;
+                }
+        return false;
+    }
+
+    private static IEnumerable<HudBlock> AllBlocks(IEnumerable<HudBlock> blocks)
+    {
+        foreach (var b in blocks)
+        {
+            yield return b;
+            foreach (var inner in AllBlocks(b.Children)) yield return inner;
+        }
+    }
+
+    /// <summary>Show a tab of the left column by its header: Elements, Events or Assets.</summary>
+    internal void ShowLeftTab(string header)
+    {
+        foreach (var item in LeftTabs.Items.OfType<TabItem>())
+            if ((item.Tag ?? item.Header) is string text && text.Equals(header, StringComparison.OrdinalIgnoreCase)) item.IsSelected = true;
+    }
+
+    /// <summary>Close without asking about unsaved changes, as the tests and the off-screen render do.</summary>
+    internal bool CloseWithoutAsking { get; set; }
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (!_closingForReload && !ConfirmDiscard("closing")) e.Cancel = true;
+        if (!_closingForReload && !CloseWithoutAsking && !ConfirmDiscard("closing")) e.Cancel = true;
     }
 
     // ── Files ────────────────────────────────────────────────────────────────────────
@@ -267,7 +306,7 @@ public partial class MainWindow : Window
         ?? (Directory.Exists(DefaultHudFolder) ? DefaultHudFolder : null);
 
     /// <summary>Open these files as the HUD, in this load order, with the transform files they need.</summary>
-    private void LoadFiles(IEnumerable<string> paths)
+    internal void LoadFiles(IEnumerable<string> paths)
     {
         var loaded = new List<HudFile>();
         foreach (var path in paths.Select(Path.GetFullPath).Distinct(HudFileSet.PathComparer))
@@ -303,8 +342,19 @@ public partial class MainWindow : Window
             InitialDirectory = StartFolder(),
         };
         if (dialog.ShowDialog(this) != true) return;
+        AddFilePaths(dialog.FileNames.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Add these files to the open HUD, after its files, in this order.</summary>
+    private void AddFilePaths(IEnumerable<string> paths)
+    {
+        if (_files.Count == 0)
+        {
+            LoadFiles(paths);
+            return;
+        }
         var added = new List<string>();
-        foreach (var path in dialog.FileNames.Select(Path.GetFullPath).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+        foreach (var path in paths.Select(Path.GetFullPath))
         {
             if (FileAt(path) is { } open)
             {
@@ -519,6 +569,8 @@ public partial class MainWindow : Window
     /// </summary>
     private async void ScanAssetFolder(string folder, bool report = true)
     {
+        // The tests open windows by the dozen and need no assets.
+        if (Environment.GetEnvironmentVariable("VISUALHUD_NO_SCAN") == "1") return;
         var generation = _scanGeneration.GetValueOrDefault(folder) + 1;
         _scanGeneration[folder] = generation;
         _scanning.Add(folder);
@@ -670,11 +722,27 @@ public partial class MainWindow : Window
 
     private void Properties_PropertyEdited(object? sender, PropertyEditedEventArgs e)
     {
-        var edit = new ReplaceArgumentEdit(e.Leaf, e.ArgIndex, e.OldArg, e.NewArg, affected: e.SelectedBlock);
-        _undo.Push(edit);
+        var edits = e.Changes
+            .Select(c => (IHudEdit)new ReplaceArgumentEdit(e.Leaf, c.Index, c.Old, c.New, affected: e.SelectedBlock))
+            .ToList();
+        _undo.Push(edits.Count == 1 ? edits[0] : new CompositeEdit(edits, $"edit {e.Leaf.Name}"));
+        _knownEvents = null;
         Canvas.Refresh();
         RefreshEventList();
         Properties.RefreshDefaultMarks();
+    }
+
+    // The event names offered for an event argument: the game's, GameExt's and the HUD's own.
+    private IReadOnlyList<string>? _knownEvents;
+
+    private IReadOnlyList<string> KnownEvents()
+    {
+        if (_knownEvents is not null) return _knownEvents;
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var info in HudEventCatalog.All) names.Add(info.Name);
+        if (Canvas.Transforms is { } graph)
+            foreach (var use in HudEventUsage.Of(Documents, graph)) names.Add(use.Name);
+        return _knownEvents = names.ToList();
     }
 
     /// <summary>The Properties panel's delete button: remove that line, as an undoable edit.</summary>
@@ -852,7 +920,7 @@ public partial class MainWindow : Window
         }
         if (node is not TreeViewItem tvi || tvi.DataContext is not { } item) return;
         // A double-click on an element's line renames it; on the rest of the row it opens or closes it.
-        if (e.ClickCount == 2 && hit is TextBlock { Name: "HeaderLabel" } && item is HudBlock block)
+        if (e.ClickCount == 2 && IsInHeaderLabel(hit) && item is HudBlock block)
         {
             BeginRename(block);
             e.Handled = true;
@@ -879,6 +947,20 @@ public partial class MainWindow : Window
         }
         tvi.IsSelected = true;
         tvi.Focus();
+        // A drag may start from here (Tree_PreviewMouseMove).
+        if (!onTick && !onArrow && item is HudBlock dragged)
+        {
+            _dragStart = e.GetPosition(Tree);
+            _dragBlock = dragged;
+        }
+    }
+
+    /// <summary>Whether a click landed on an element's keyword and name in its row.</summary>
+    private static bool IsInHeaderLabel(DependencyObject? node)
+    {
+        for (; node is not null and not TreeViewItem; node = VisualTreeHelper.GetParent(node))
+            if (node is FrameworkElement { Name: "HeaderLabel" }) return true;
+        return false;
     }
 
     /// <summary>A right-click selects the row under it, so the context menu acts on that row, or on the selected rows it is one of.</summary>
@@ -902,7 +984,7 @@ public partial class MainWindow : Window
     private bool _picking;
 
     /// <summary>The selected rows, files or blocks, as they stand: the picked ones, else the tree's selection.</summary>
-    private IReadOnlyList<object> SelectedItems =>
+    internal IReadOnlyList<object> SelectedItems =>
         _picked.Count > 0
             ? _picked.Where(i => i is HudFile f ? _files.Contains(f) : i is HudBlock b && Locate(b) is not null).ToList()
             : Tree.SelectedItem is { } one ? new[] { one } : Array.Empty<object>();
@@ -933,14 +1015,14 @@ public partial class MainWindow : Window
         SetPickedFlag(item, true);
     }
 
-    private void ClearPicks()
+    internal void ClearPicks()
     {
         foreach (var item in _picked) SetPickedFlag(item, false);
         _picked.Clear();
     }
 
     /// <summary>Ctrl+click: add a row to the selected ones, or drop it; the row selected so far joins them.</summary>
-    private void TogglePick(object item)
+    internal void TogglePick(object item)
     {
         // The one row selected stays selected: a selection is never empty.
         if (_picked.Count == 0 && ReferenceEquals(Tree.SelectedItem, item)) return;
@@ -968,7 +1050,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Shift+click: the rows from the last one clicked to this one, as the tree shows them; with Ctrl, added to those picked.</summary>
-    private void PickRange(object item, bool add)
+    internal void PickRange(object item, bool add)
     {
         var rows = ShownRows();
         var from = rows.IndexOf(_anchor ?? Tree.SelectedItem ?? item);
@@ -1025,6 +1107,8 @@ public partial class MainWindow : Window
     /// <summary>Outline the selected elements on the canvas, and say how many rows are selected.</summary>
     private void ShowSelection()
     {
+        // The toolbar's Copy, Duplicate and Move follow the selection.
+        CommandManager.InvalidateRequerySuggested();
         var items = SelectedItems;
         Canvas.HighlightBlocks(items.OfType<HudBlock>().ToList(), Tree.SelectedItem as HudBlock);
         if (_picked.Count > 1)
@@ -1114,7 +1198,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Hide the selected rows, or show them when all are hidden already.</summary>
-    private bool ToggleHideSelected()
+    internal bool ToggleHideSelected()
     {
         var items = SelectedItems;
         if (items.Count == 0) return false;
@@ -1132,7 +1216,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void ShowEverything()
+    internal void ShowEverything()
     {
         var count = 0;
         foreach (var file in _files)
@@ -1182,7 +1266,7 @@ public partial class MainWindow : Window
     /// blocks keep their ticks, so showing it again brings them back as they were; what is in one of
     /// <paramref name="items"/> all shows, and a whole file among them keeps its ticks.
     /// </summary>
-    private void ShowOnly(IReadOnlyList<object> items)
+    internal void ShowOnly(IReadOnlyList<object> items)
     {
         var wholeFiles = items.OfType<HudFile>().ToHashSet();
         var kept = new HashSet<HudBlock>(ReferenceEqualityComparer.Instance);
@@ -1252,7 +1336,7 @@ public partial class MainWindow : Window
     /// Delete the selected blocks as one undoable edit; with only files selected, take them out of the
     /// HUD. A block inside another selected one goes with it.
     /// </summary>
-    private void DeleteSelected()
+    internal void DeleteSelected()
     {
         var items = SelectedItems;
         var blocks = items.OfType<HudBlock>().ToList();
@@ -1299,7 +1383,7 @@ public partial class MainWindow : Window
     /// Fill an Insert menu with every block the editor can make, by category; a category of one is a
     /// single item. Whether each fits is decided when the menu opens (<see cref="UpdateInsertMenu"/>).
     /// </summary>
-    private void BuildInsertMenu(MenuItem root, bool inside)
+    private void BuildInsertMenu(ItemsControl root, bool inside)
     {
         TemplateFamily? family = null;
         foreach (var category in HudBlockTemplates.Categories)
@@ -1353,14 +1437,22 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Enable what fits where the insert would go; a greyed entry's tooltip says why not.</summary>
-    private void UpdateInsertMenu(MenuItem root, bool inside)
+    private void UpdateInsertMenu(ItemsControl root, bool inside)
     {
         var target = InsertTargetFor(inside, out var why);
-        root.IsEnabled = target is not null;
-        root.ToolTip = target is null ? why : $"Into {Describe(target)}.";
-        if (target is null) return;
+        if (root is MenuItem menu)
+        {
+            menu.IsEnabled = target is not null;
+            menu.ToolTip = target is null ? why : $"Into {Describe(target)}.";
+        }
         foreach (var item in TemplateItems(root))
         {
+            if (target is null)
+            {
+                item.IsEnabled = false;
+                item.ToolTip = why;
+                continue;
+            }
             var (template, _) = (ValueTuple<BlockTemplate, bool>)item.Tag;
             var reason = WhyNotInsert(template, target);
             item.IsEnabled = reason is null;
@@ -1411,17 +1503,21 @@ public partial class MainWindow : Window
 
     private void InsertTemplate_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: ValueTuple<BlockTemplate, bool> tag }) return;
-        var (template, inside) = tag;
+        if (sender is MenuItem { Tag: ValueTuple<BlockTemplate, bool> tag }) InsertTemplate(tag.Item1, tag.Item2);
+    }
+
+    /// <summary>Insert a new block of <paramref name="template"/> inside or after the selection; the block, or null.</summary>
+    internal HudBlock? InsertTemplate(BlockTemplate template, bool inside)
+    {
         if (InsertTargetFor(inside, out var why) is not { } target)
         {
             StatusText.Text = why ?? "There is nowhere to insert it.";
-            return;
+            return null;
         }
         if (WhyNotInsert(template, target) is { } reason)
         {
             StatusText.Text = reason;
-            return;
+            return null;
         }
         var name = template.Keyword == "FileInfo"
             ? Path.GetFileNameWithoutExtension(target.File.FilePath) ?? template.BaseName
@@ -1443,7 +1539,15 @@ public partial class MainWindow : Window
         // Name it straight away, as a new folder is; Enter or a click elsewhere keeps the name.
         if (HudRename.WhyNot(block, target.Container) is null)
             Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => BeginRename(block));
+        return block;
     }
+
+    /// <summary>The open files, in load order.</summary>
+    internal IReadOnlyList<HudFile> Files => _files;
+
+    internal UndoManager History => _undo;
+
+    internal string Status => StatusText.Text;
 
     private static string FirstName(HudBlock b) => HudRename.NameOf(b) ?? "(unnamed)";
 
@@ -1467,7 +1571,7 @@ public partial class MainWindow : Window
     // ── Rename ───────────────────────────────────────────────────────────────────────
 
     // The tree row being renamed: its block, the box in place of its line, the line, and the row.
-    private (HudBlock Block, TextBox Box, TextBlock Label, TreeViewItem Row)? _renaming;
+    private (HudBlock Block, TextBox Box, FrameworkElement Label, TreeViewItem Row)? _renaming;
 
     private void Rename_Click(object sender, RoutedEventArgs e) => BeginRenameSelected();
     private void Rename_Executed(object sender, ExecutedRoutedEventArgs e) => BeginRenameSelected();
@@ -1490,7 +1594,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Swap the block's line in the tree for a box holding its name, selected for typing over.</summary>
-    private void BeginRename(HudBlock block)
+    internal void BeginRename(HudBlock block)
     {
         if (_renaming is not null) return;
         if (RenameRefusal(block) is { } why)
@@ -1501,7 +1605,7 @@ public partial class MainWindow : Window
         if (Locate(block) is not { } at || SelectPath(at.File, at.Path) is not { } row ||
             row.Template.FindName("PART_Header", row) is not ContentPresenter header ||
             header.ContentTemplate?.FindName("RenameBox", header) is not TextBox box ||
-            header.ContentTemplate.FindName("HeaderLabel", header) is not TextBlock label)
+            header.ContentTemplate.FindName("HeaderLabel", header) is not FrameworkElement label)
         {
             Properties.FocusName();
             return;
@@ -1544,7 +1648,7 @@ public partial class MainWindow : Window
     /// Rename a block, and the lines that find it by name, as one undoable edit; the status bar says
     /// what the game makes of the new name. False when the name cannot be written.
     /// </summary>
-    private bool ApplyRename(HudBlock block, string newName)
+    internal bool ApplyRename(HudBlock block, string newName)
     {
         if (HudRename.NameOf(block) is not { } oldName) return false;
         newName = newName.Trim();

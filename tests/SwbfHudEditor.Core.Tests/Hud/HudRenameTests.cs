@@ -127,13 +127,15 @@ public class HudRenameTests
     {
         var doc = HudParser.Parse("// the bar\nBarBitmap( \"old\" ) // odd spacing\n{\n    Value(0.5)\n}\n");
         var bar = doc.TopLevel[0];
-        string? changed = null;
-        bar.PropertyChanged += (_, e) => changed = e.PropertyName;
+        var changed = new List<string?>();
+        bar.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
 
         var edit = HudRename.Plan(new[] { doc }, bar, "new").Edit;
         edit.Apply();
-        Assert.Equal(nameof(HudBlock.Header), changed);
+        Assert.Contains(nameof(HudBlock.Header), changed);
+        Assert.Contains(nameof(HudBlock.ItemName), changed);
         Assert.Equal("BarBitmap(\"new\") { ... }", bar.Header);
+        Assert.Equal("new", bar.ItemName);
         Assert.Equal("// the bar\nBarBitmap(\"new\") // odd spacing\n{\n    Value(0.5)\n}\n", HudWriter.Write(doc));
         Assert.Equal("rename BarBitmap \"old\" to \"new\"", edit.Description);
 

@@ -12,6 +12,7 @@ public partial class App : Application
             Shutdown(exitCode);
             return;
         }
+        if (UiSnapshot.TryRun(e.Args, this)) return;
         new MainWindow().Show();
     }
 }

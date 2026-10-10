@@ -18,8 +18,11 @@ internal sealed class AppSettings
     public bool ReferenceOnTop { get; set; }
     public bool ReferenceShown { get; set; } = true;
 
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VisualHUD", "settings.json");
+    /// <summary>The settings file: <c>VISUALHUD_SETTINGS</c> if set, as the tests do, else the user's.</summary>
+    internal static string FilePath =>
+        Environment.GetEnvironmentVariable("VISUALHUD_SETTINGS") is { Length: > 0 } path
+            ? path
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VisualHUD", "settings.json");
 
     public static AppSettings Load()
     {

@@ -7,69 +7,108 @@
         xmlns:views="clr-namespace:SwbfHudEditor.App.Views"
         xmlns:local="clr-namespace:SwbfHudEditor.App"
         mc:Ignorable="d"
-        Title="VisualHUD" Height="800" Width="1400"
+        Title="VisualHUD" Height="900" Width="1560" MinWidth="900" MinHeight="560"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="{StaticResource UiFont}" FontSize="{StaticResource UiFontSize}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
         Loaded="Window_Loaded"
         Closing="Window_Closing"
+        SourceInitialized="Window_SourceInitialized"
         PreviewKeyDown="Window_KeyDown">
     <Window.Resources>
-        <!-- Dark theme applied to every TreeViewItem so the label text keeps its intended color
-             (gold for files, light blue for blocks) instead of the default system
-             selection foreground. Background stays dark gray; hover/selection keeps the same
-             subtle highlight seen in other dark editors.
-             Preview-click handler ensures clicking ANYWHERE in the row (including the checkbox)
-             selects the item first — default WPF lets the CheckBox eat the click, which left
-             users pressing H on what looked like a selection but actually wasn't. -->
-        <Style TargetType="TreeViewItem">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#d4e8ff" />
+        <!-- A row of the tree: the theme's, marked when several rows are selected and hidden while
+             the filter leaves it out. -->
+        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
             <Style.Triggers>
-                <!-- One of several rows picked with Ctrl or Shift. -->
                 <DataTrigger Binding="{Binding IsMultiSelected}" Value="True">
-                    <Setter Property="Background" Value="#264f78" />
+                    <Setter Property="Background" Value="{StaticResource PickedBrush}" />
                 </DataTrigger>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#3a4552" />
-                </Trigger>
+                <DataTrigger Binding="{Binding IsFilteredOut}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Show or hide on the canvas: an eye, struck through when hidden. -->
+        <Style x:Key="EyeToggle" TargetType="CheckBox">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border Background="Transparent" Width="20" Height="18">
+                            <TextBlock x:Name="Glyph" Text="&#xE7B3;" Style="{StaticResource Icon}" FontSize="12"
+                                       Foreground="{StaticResource TextMutedBrush}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Glyph" Property="Text" Value="&#xED1A;" />
+                                <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource WarningBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource TextBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <views:ElementsOnlyConverter x:Key="ElementsOnly" />
+
         <!-- A file of the HUD, in load order: the game loads a HUD's files additively, each laid out
              by its own FileInfo. Its blocks are nested under it as written. -->
         <HierarchicalDataTemplate DataType="{x:Type local:HudFile}" ItemsSource="{Binding Document.TopLevel, Converter={StaticResource ElementsOnly}}">
             <StackPanel Orientation="Horizontal" ToolTip="{Binding FilePath}">
-                <CheckBox IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,4,0" VerticalAlignment="Center"
-                          ToolTip="Show/hide this file's elements on the canvas; on a selected row, every selected row. Ctrl+click shows only this file."
-                          Click="VisibilityCheckBox_Click" />
-                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#ffd479" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding Note}" Foreground="#8a8f96" FontStyle="Italic" Margin="8,0,0,0" VerticalAlignment="Center" />
+                <CheckBox Style="{StaticResource EyeToggle}" IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,2,0"
+                          VerticalAlignment="Center" Click="VisibilityCheckBox_Click"
+                          ToolTip="Show or hide this file's elements on the canvas; on a selected row, every selected row. Ctrl+click shows only this file." />
+                <TextBlock Text="&#xE8A5;" Style="{StaticResource Icon}" FontSize="12" Foreground="{StaticResource FileBrush}" Margin="0,0,6,0" />
+                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{StaticResource FileBrush}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Note}" Foreground="{StaticResource TextMutedBrush}" FontStyle="Italic" Margin="8,0,0,0" VerticalAlignment="Center" />
             </StackPanel>
         </HierarchicalDataTemplate>
+
         <!-- A block of the file, in file order, with the elements it holds nested under it (its
-             property lines are in the Properties panel): the per-element visibility toggle and
-             the block as written. F2 swaps the line for a box to rename it in. -->
+             property lines are in the Properties panel): the eye, its keyword and its name. F2 swaps
+             the name for a box to rename it in. -->
         <HierarchicalDataTemplate DataType="{x:Type hud:HudBlock}" ItemsSource="{Binding Children, Converter={StaticResource ElementsOnly}}">
             <StackPanel Orientation="Horizontal">
-                <CheckBox IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,4,0" VerticalAlignment="Center"
-                          ToolTip="Show/hide this element (and its descendants) on the canvas; on a selected row, every selected row. Ctrl+click shows only this element."
-                          Click="VisibilityCheckBox_Click" />
-                <TextBlock x:Name="HeaderLabel" Text="{Binding Header}" FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
-                           Foreground="#7fc3ff" VerticalAlignment="Center" />
-                <TextBox x:Name="RenameBox" Visibility="Collapsed" MinWidth="160" Padding="2,0"
-                         FontFamily="Consolas, Cascadia Mono, Menlo, monospace"
-                         Background="#1b2027" Foreground="#ffffff" BorderBrush="#7fc3ff" CaretBrush="#ffffff"
+                <CheckBox Style="{StaticResource EyeToggle}" IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,0,2,0"
+                          VerticalAlignment="Center" Click="VisibilityCheckBox_Click"
+                          ToolTip="Show or hide this element and what it holds on the canvas; on a selected row, every selected row. Ctrl+click shows only this element." />
+                <StackPanel x:Name="HeaderLabel" Orientation="Horizontal" Background="Transparent">
+                    <TextBlock x:Name="KindLabel" Text="{Binding Name}" Foreground="{StaticResource TextMutedBrush}" FontSize="11.5"
+                               VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBlock Text="{Binding ItemName}" Foreground="{StaticResource CodeBrush}" FontFamily="{StaticResource MonoFont}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBox x:Name="RenameBox" Visibility="Collapsed" MinWidth="180" Padding="3,0" FontFamily="{StaticResource MonoFont}"
                          KeyDown="RenameBox_KeyDown" LostKeyboardFocus="RenameBox_LostKeyboardFocus" />
             </StackPanel>
+            <HierarchicalDataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsVisible}" Value="False">
+                    <Setter TargetName="HeaderLabel" Property="Opacity" Value="0.45" />
+                </DataTrigger>
+            </HierarchicalDataTemplate.Triggers>
         </HierarchicalDataTemplate>
     </Window.Resources>
+
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
+                <MenuItem Header="_New HUD file..." Click="New_Click" InputGestureText="Ctrl+N"
+                          ToolTip="Start a new .hud file with a FileInfo, alone or added to the open HUD." />
                 <MenuItem Header="_Open..." Click="Open_Click" InputGestureText="Ctrl+O"
                           ToolTip="Open the files of a HUD: one, or several that load together." />
                 <MenuItem Header="_Add HUD file..." Click="AddFiles_Click"
                           ToolTip="Load more files with the open ones, after them, as the game loads a HUD's files additively. Each keeps its own FileInfo layout." />
                 <MenuItem Header="Re_move file from HUD" Click="RemoveFile_Click"
                           ToolTip="Take the selection's file out of the HUD. The file on disk is not changed." />
+                <Separator />
+                <MenuItem Header="_Save" Click="Save_Click" InputGestureText="Ctrl+S"
+                          ToolTip="Write every file with unsaved changes." />
+                <MenuItem Header="Save file _as..." Click="SaveAs_Click" InputGestureText="Ctrl+Shift+S"
+                          ToolTip="Write the selection's file under a new name." />
                 <Separator />
                 <MenuItem Header="Load reference _image..." Click="LoadReference_Click"
                           ToolTip="Lay an image under the HUD, such as a screenshot of the game or a mock-up, stretched across the screen. It is never saved into a .hud file, and is remembered for next time." />
@@ -80,87 +119,183 @@
                 <MenuItem Header="_Reload files" Click="Reload_Click" InputGestureText="F5"
                           ToolTip="Restart the editor and re-read the files from disk. Useful after editing externally." />
                 <Separator />
-                <MenuItem Header="_Save" Click="Save_Click" InputGestureText="Ctrl+S"
-                          ToolTip="Write every file with unsaved changes." />
-                <MenuItem Header="Save file _as..." Click="SaveAs_Click" InputGestureText="Ctrl+Shift+S"
-                          ToolTip="Write the selection's file under a new name." />
-                <Separator />
                 <MenuItem Header="E_xit" Click="Exit_Click" />
             </MenuItem>
             <MenuItem Header="_Edit" SubmenuOpened="EditMenu_SubmenuOpened">
                 <MenuItem Header="_Undo" Command="{x:Static ApplicationCommands.Undo}" InputGestureText="Ctrl+Z" />
                 <MenuItem Header="_Redo" Command="{x:Static ApplicationCommands.Redo}" InputGestureText="Ctrl+Y" />
                 <Separator />
+                <MenuItem Header="Cu_t" Command="{x:Static ApplicationCommands.Cut}" InputGestureText="Ctrl+X" />
+                <MenuItem Header="_Copy" Command="{x:Static ApplicationCommands.Copy}" InputGestureText="Ctrl+C" />
+                <MenuItem Header="_Paste" Command="{x:Static ApplicationCommands.Paste}" InputGestureText="Ctrl+V" />
+                <MenuItem Header="D_uplicate" Command="{x:Static local:MainWindow.DuplicateCommand}" InputGestureText="Ctrl+D" />
+                <Separator />
                 <MenuItem x:Name="EditInsertInside" Header="_Insert inside" ToolTipService.ShowOnDisabled="True" />
                 <MenuItem x:Name="EditInsertAfter" Header="Insert _after" ToolTipService.ShowOnDisabled="True" />
                 <Separator />
+                <MenuItem Header="Move up" Command="{x:Static local:MainWindow.MoveUpCommand}" InputGestureText="Alt+Up" />
+                <MenuItem Header="Move down" Command="{x:Static local:MainWindow.MoveDownCommand}" InputGestureText="Alt+Down" />
+                <Separator />
                 <MenuItem x:Name="EditRename" Header="Re_name" Click="Rename_Click" InputGestureText="F2"
                           ToolTipService.ShowOnDisabled="True" />
-                <MenuItem Header="_Delete selected" Click="DeleteSelected_Click" InputGestureText="Del" />
+                <MenuItem Header="_Delete" Click="DeleteSelected_Click" InputGestureText="Del" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="Hide or show the selection" Click="ToggleHide_Click" InputGestureText="H" />
+                <MenuItem Header="Show only the selection" Click="ShowOnly_Click" InputGestureText="Shift+H" />
+                <MenuItem Header="Show everything in the selection" Click="ShowInside_Click" />
+                <MenuItem Header="Show all" Click="ShowAll_Click" InputGestureText="Alt+H" />
+                <Separator />
+                <MenuItem Header="Expand all rows" Click="ExpandAll_Click" />
+                <MenuItem Header="Collapse all rows" Click="CollapseAll_Click" />
             </MenuItem>
         </Menu>
+
+        <!-- The main toolbar: the commands used most, as icons. -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource WindowBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="6,2">
+            <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource ToolButton}" Click="New_Click" ToolTip="New HUD file (Ctrl+N)">
+                    <TextBlock Text="&#xE8A5;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Click="Open_Click" ToolTip="Open (Ctrl+O)">
+                    <TextBlock Text="&#xE8E5;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Click="Save_Click" ToolTip="Save every file with changes (Ctrl+S)">
+                    <TextBlock Text="&#xE74E;" Style="{StaticResource Icon}" />
+                </Button>
+                <Separator />
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static ApplicationCommands.Undo}" ToolTip="Undo (Ctrl+Z)">
+                    <TextBlock Text="&#xE7A7;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static ApplicationCommands.Redo}" ToolTip="Redo (Ctrl+Y)">
+                    <TextBlock Text="&#xE7A6;" Style="{StaticResource Icon}" />
+                </Button>
+                <Separator />
+                <Button x:Name="InsertButton" Style="{StaticResource ToolButton}" Click="InsertButton_Click"
+                        ToolTip="Insert an element, a transform or a file block into the selection">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" />
+                        <TextBlock Text="Insert" Margin="6,0,4,0" VerticalAlignment="Center" />
+                        <TextBlock Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="9" />
+                    </StackPanel>
+                    <Button.ContextMenu>
+                        <ContextMenu x:Name="ToolbarInsertMenu" />
+                    </Button.ContextMenu>
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static local:MainWindow.DuplicateCommand}" ToolTip="Duplicate (Ctrl+D)">
+                    <TextBlock Text="&#xF413;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Click="DeleteSelected_Click" ToolTip="Delete (Del)">
+                    <TextBlock Text="&#xE74D;" Style="{StaticResource Icon}" />
+                </Button>
+                <Separator />
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static ApplicationCommands.Cut}" ToolTip="Cut (Ctrl+X)">
+                    <TextBlock Text="&#xE8C6;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static ApplicationCommands.Copy}" ToolTip="Copy, as .hud text (Ctrl+C)">
+                    <TextBlock Text="&#xE8C8;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static ApplicationCommands.Paste}" ToolTip="Paste .hud text into the selection (Ctrl+V)">
+                    <TextBlock Text="&#xE77F;" Style="{StaticResource Icon}" />
+                </Button>
+                <Separator />
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static local:MainWindow.MoveUpCommand}" ToolTip="Move up (Alt+Up)">
+                    <TextBlock Text="&#xE74A;" Style="{StaticResource Icon}" />
+                </Button>
+                <Button Style="{StaticResource ToolButton}" Command="{x:Static local:MainWindow.MoveDownCommand}" ToolTip="Move down (Alt+Down)">
+                    <TextBlock Text="&#xE74B;" Style="{StaticResource Icon}" />
+                </Button>
+            </StackPanel>
+        </Border>
+
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
-                <TextBlock x:Name="StatusText" Text="Ready. Open a HUD's .hud files to begin." />
+                <TextBlock x:Name="StatusText" Text="Ready. Open a HUD's .hud files, or start a new one." TextTrimming="CharacterEllipsis" />
             </StatusBarItem>
-            <Separator Margin="8,0" />
-            <StatusBarItem>
-                <TextBlock x:Name="HoverText" Text="" Foreground="#888" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" />
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock x:Name="HoverText" Text="" Foreground="{StaticResource TextMutedBrush}" FontFamily="{StaticResource MonoFont}" />
             </StatusBarItem>
         </StatusBar>
+
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="320" />
-                <ColumnDefinition Width="4" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="4" />
-                <ColumnDefinition Width="360" />
+                <ColumnDefinition Width="340" MinWidth="220" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="*" MinWidth="300" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="380" MinWidth="260" />
             </Grid.ColumnDefinitions>
-            <TabControl x:Name="LeftTabs" Grid.Column="0" Background="#252a30" BorderThickness="0" Padding="0"
-                        SelectionChanged="LeftTabs_SelectionChanged">
-                <TabItem Header="Elements">
-                <TreeView x:Name="Tree" SelectedItemChanged="Tree_SelectedItemChanged"
-                          PreviewMouseLeftButtonDown="Tree_PreviewMouseLeftButtonDown"
-                          PreviewMouseRightButtonDown="Tree_PreviewMouseRightButtonDown"
-                          Background="#252a30" Foreground="#d4e8ff" BorderThickness="0">
-                    <TreeView.ContextMenu>
-                        <ContextMenu Opened="TreeMenu_Opened">
-                            <MenuItem x:Name="TreeInsertInside" Header="Insert inside" ToolTipService.ShowOnDisabled="True" />
-                            <MenuItem x:Name="TreeInsertAfter" Header="Insert after" ToolTipService.ShowOnDisabled="True" />
-                            <Separator />
-                            <MenuItem x:Name="TreeRename" Header="Rename" Click="Rename_Click" InputGestureText="F2"
-                                      ToolTipService.ShowOnDisabled="True" />
-                            <MenuItem Header="Delete" Click="DeleteSelected_Click" InputGestureText="Del" />
-                            <Separator />
-                            <!-- On the canvas only: what is hidden here is still in the file. -->
-                            <MenuItem Header="Show and hide">
-                                <MenuItem x:Name="TreeToggleHide" Header="Hide" Click="ToggleHide_Click" InputGestureText="H" />
-                                <MenuItem Header="Show only this" Click="ShowOnly_Click" InputGestureText="Shift+H"
-                                          ToolTip="Hide everything else: the other files, and in this file all but this, what holds it and what it holds." />
-                                <MenuItem Header="Show everything in this" Click="ShowInside_Click"
-                                          ToolTip="Show this, what holds it and all it holds." />
-                                <MenuItem Header="Show all" Click="ShowAll_Click" InputGestureText="Alt+H" />
-                            </MenuItem>
-                        </ContextMenu>
-                    </TreeView.ContextMenu>
-                </TreeView>
+            <TabControl x:Name="LeftTabs" Grid.Column="0" SelectionChanged="LeftTabs_SelectionChanged">
+                <TabItem Header="Elements" Tag="Elements">
+                    <DockPanel>
+                        <!-- Find rows by name or keyword; the rows that hold a match stay. -->
+                        <Grid DockPanel.Dock="Top" Margin="8,8,8,4">
+                            <TextBox x:Name="TreeFilter" Padding="24,3,6,3" TextChanged="TreeFilter_TextChanged"
+                                     ToolTip="Show only the rows whose name or keyword contains this, and the rows that hold them." />
+                            <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="11" HorizontalAlignment="Left" Margin="8,0,0,0"
+                                       Foreground="{StaticResource TextMutedBrush}" IsHitTestVisible="False" />
+                            <TextBlock Text="Filter elements" Foreground="{StaticResource TextMutedBrush}" Margin="26,0,0,0" VerticalAlignment="Center"
+                                       IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=TreeFilter}" Value="">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <TreeView x:Name="Tree" SelectedItemChanged="Tree_SelectedItemChanged"
+                                  PreviewMouseLeftButtonDown="Tree_PreviewMouseLeftButtonDown"
+                                  PreviewMouseRightButtonDown="Tree_PreviewMouseRightButtonDown"
+                                  PreviewMouseMove="Tree_PreviewMouseMove" AllowDrop="True"
+                                  DragOver="Tree_DragOver" Drop="Tree_Drop" DragLeave="Tree_DragLeave">
+                            <TreeView.ContextMenu>
+                                <ContextMenu Opened="TreeMenu_Opened">
+                                    <MenuItem x:Name="TreeInsertInside" Header="Insert inside" ToolTipService.ShowOnDisabled="True" />
+                                    <MenuItem x:Name="TreeInsertAfter" Header="Insert after" ToolTipService.ShowOnDisabled="True" />
+                                    <Separator />
+                                    <MenuItem Header="Cut" Command="{x:Static ApplicationCommands.Cut}" InputGestureText="Ctrl+X" />
+                                    <MenuItem Header="Copy" Command="{x:Static ApplicationCommands.Copy}" InputGestureText="Ctrl+C" />
+                                    <MenuItem Header="Paste" Command="{x:Static ApplicationCommands.Paste}" InputGestureText="Ctrl+V" />
+                                    <MenuItem Header="Duplicate" Command="{x:Static local:MainWindow.DuplicateCommand}" InputGestureText="Ctrl+D" />
+                                    <Separator />
+                                    <MenuItem x:Name="TreeRename" Header="Rename" Click="Rename_Click" InputGestureText="F2"
+                                              ToolTipService.ShowOnDisabled="True" />
+                                    <MenuItem Header="Delete" Click="DeleteSelected_Click" InputGestureText="Del" />
+                                    <Separator />
+                                    <!-- On the canvas only: what is hidden here is still in the file. -->
+                                    <MenuItem Header="Show and hide">
+                                        <MenuItem x:Name="TreeToggleHide" Header="Hide" Click="ToggleHide_Click" InputGestureText="H" />
+                                        <MenuItem Header="Show only this" Click="ShowOnly_Click" InputGestureText="Shift+H"
+                                                  ToolTip="Hide everything else: the other files, and in this file all but this, what holds it and what it holds." />
+                                        <MenuItem Header="Show everything in this" Click="ShowInside_Click"
+                                                  ToolTip="Show this, what holds it and all it holds." />
+                                        <MenuItem Header="Show all" Click="ShowAll_Click" InputGestureText="Alt+H" />
+                                    </MenuItem>
+                                </ContextMenu>
+                            </TreeView.ContextMenu>
+                        </TreeView>
+                    </DockPanel>
                 </TabItem>
-                <TabItem Header="Events">
+                <TabItem Header="Events" Tag="Events">
                     <views:EventsPanel x:Name="EventsList" />
                 </TabItem>
-                <TabItem x:Name="AssetsTab" Header="Assets">
+                <TabItem x:Name="AssetsTab" Header="Assets" Tag="Assets">
                     <views:AssetsPanel x:Name="AssetsList" />
                 </TabItem>
             </TabControl>
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                          Background="#333" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" />
             <views:HudCanvas x:Name="Canvas" Grid.Column="2"
                              BlockSelected="Canvas_BlockSelected"
                              HoverInfoChanged="Canvas_HoverInfoChanged"
                              BlockDragged="Canvas_BlockDragged"
                              BlockDragCommitted="Canvas_BlockDragCommitted" />
-            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                          Background="#333" ResizeBehavior="PreviousAndNext" />
+            <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" />
             <views:PropertyPanel x:Name="Properties" Grid.Column="4"
                                  PropertyEdited="Properties_PropertyEdited"
                                  PropertyInsertRequested="Properties_PropertyInsertRequested"
@@ -169,12 +304,16 @@
         </Grid>
     </DockPanel>
     <Window.InputBindings>
+        <KeyBinding Modifiers="Control" Key="N" Command="{x:Static ApplicationCommands.New}" />
         <KeyBinding Modifiers="Control" Key="O" Command="{x:Static ApplicationCommands.Open}" />
         <KeyBinding Modifiers="Control" Key="S" Command="{x:Static ApplicationCommands.Save}" />
         <KeyBinding Modifiers="Control+Shift" Key="S" Command="{x:Static ApplicationCommands.SaveAs}" />
         <KeyBinding Modifiers="Control" Key="Z" Command="{x:Static ApplicationCommands.Undo}" />
         <KeyBinding Modifiers="Control" Key="Y" Command="{x:Static ApplicationCommands.Redo}" />
         <KeyBinding Modifiers="Control+Shift" Key="Z" Command="{x:Static ApplicationCommands.Redo}" />
+        <KeyBinding Modifiers="Control" Key="D" Command="{x:Static local:MainWindow.DuplicateCommand}" />
+        <KeyBinding Modifiers="Alt" Key="Up" Command="{x:Static local:MainWindow.MoveUpCommand}" />
+        <KeyBinding Modifiers="Alt" Key="Down" Command="{x:Static local:MainWindow.MoveDownCommand}" />
         <KeyBinding Key="F5" Command="{x:Static NavigationCommands.Refresh}" />
         <KeyBinding Key="F2" Command="{x:Static local:MainWindow.RenameCommand}" />
         <KeyBinding Key="H" Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" />
@@ -182,11 +321,18 @@
         <KeyBinding Modifiers="Shift" Key="H" Command="{x:Static local:MainWindow.ShowOnlySelectedCommand}" />
     </Window.InputBindings>
     <Window.CommandBindings>
+        <CommandBinding Command="{x:Static ApplicationCommands.New}" Executed="New_Executed" />
         <CommandBinding Command="{x:Static ApplicationCommands.Open}" Executed="Open_Executed" />
         <CommandBinding Command="{x:Static ApplicationCommands.Save}" Executed="Save_Executed" CanExecute="Save_CanExecute" />
         <CommandBinding Command="{x:Static ApplicationCommands.SaveAs}" Executed="SaveAs_Executed" CanExecute="Save_CanExecute" />
         <CommandBinding Command="{x:Static ApplicationCommands.Undo}" Executed="Undo_Executed" CanExecute="Undo_CanExecute" />
         <CommandBinding Command="{x:Static ApplicationCommands.Redo}" Executed="Redo_Executed" CanExecute="Redo_CanExecute" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Cut}" Executed="Cut_Executed" CanExecute="BlockCommand_CanExecute" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Copy}" Executed="Copy_Executed" CanExecute="BlockCommand_CanExecute" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Paste}" Executed="Paste_Executed" CanExecute="Paste_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.DuplicateCommand}" Executed="Duplicate_Executed" CanExecute="BlockCommand_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.MoveUpCommand}" Executed="MoveUp_Executed" CanExecute="MoveCommand_CanExecute" />
+        <CommandBinding Command="{x:Static local:MainWindow.MoveDownCommand}" Executed="MoveDown_Executed" CanExecute="MoveCommand_CanExecute" />
         <CommandBinding Command="{x:Static NavigationCommands.Refresh}" Executed="Reload_Executed" CanExecute="Reload_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.ToggleHideSelectedCommand}" Executed="ToggleHideSelected_Executed" CanExecute="HideCommand_CanExecute" />
         <CommandBinding Command="{x:Static local:MainWindow.UnhideAllCommand}" Executed="UnhideAll_Executed" CanExecute="HideCommand_CanExecute" />

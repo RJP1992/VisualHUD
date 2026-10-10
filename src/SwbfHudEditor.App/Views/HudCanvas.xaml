@@ -3,92 +3,128 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:views="clr-namespace:SwbfHudEditor.App.Views"
              mc:Ignorable="d"
-             Background="#181818">
+             Background="{StaticResource CanvasBrush}">
+    <UserControl.Resources>
+        <views:InverseBoolConverter x:Key="NotBool" />
+    </UserControl.Resources>
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="#222" Padding="6,3" BorderBrush="#333" BorderThickness="0,0,0,1">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Game:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <ComboBox x:Name="TargetCombo" SelectedIndex="0" Width="90" SelectionChanged="TargetCombo_SelectionChanged"
+        <!-- What the HUD is drawn as: the game, the screen, whose view, and the text shown. -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="8,5">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                    <Button Style="{StaticResource ToolButton}" Click="ZoomOut_Click" ToolTip="Zoom out (Ctrl+Wheel)">
+                        <TextBlock Text="&#xE71F;" Style="{StaticResource Icon}" FontSize="12" />
+                    </Button>
+                    <TextBlock x:Name="ZoomText" Text="100%" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"
+                               MinWidth="40" TextAlignment="Center" />
+                    <Button Style="{StaticResource ToolButton}" Click="ZoomIn_Click" ToolTip="Zoom in (Ctrl+Wheel)">
+                        <TextBlock Text="&#xE8A3;" Style="{StaticResource Icon}" FontSize="12" />
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="Fit_Click" ToolTip="Fit the screen in the view">
+                        <TextBlock Text="&#xE9A6;" Style="{StaticResource Icon}" FontSize="12" />
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="ActualSize_Click" ToolTip="One screen pixel to one display pixel">
+                        <TextBlock Text="1:1" FontSize="11" />
+                    </Button>
+                </StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="Game" Style="{StaticResource Label}" Margin="0,0,6,0" />
+                    <ComboBox x:Name="TargetCombo" SelectedIndex="0" Width="92" Margin="0,2,14,2" SelectionChanged="TargetCombo_SelectionChanged"
                               ToolTip="Which game to draw the HUD as. GameExt honours AuthoredRatio, TrueWidescreen, ScreenAnchor and FillFrom; the stock game ignores those lines and stretches the HUD on a wide screen.">
                         <ComboBoxItem Content="GameExt" />
                         <ComboBoxItem Content="Vanilla" />
                     </ComboBox>
-
-                    <TextBlock Text="Screen:" Foreground="#999" VerticalAlignment="Center" Margin="16,0,6,0" />
-                    <ComboBox x:Name="ScreenCombo" Width="150" SelectionChanged="ScreenCombo_SelectionChanged"
+                    <TextBlock Text="Screen" Style="{StaticResource Label}" Margin="0,0,6,0" />
+                    <ComboBox x:Name="ScreenCombo" Width="140" Margin="0,2,14,2" SelectionChanged="ScreenCombo_SelectionChanged"
                               ToolTip="The resolution the game draws at: the back buffer, or what Shader Patch's display scaling makes the game see (1280×720 on a 4K screen at 150%). &quot;Pixels&quot; values depend on it." />
-
-                    <TextBlock Text="Viewport:" Foreground="#999" VerticalAlignment="Center" Margin="16,0,6,0" />
-                    <ComboBox x:Name="ViewportCombo" SelectedIndex="0" Width="50" SelectionChanged="ViewportCombo_SelectionChanged"
+                    <TextBlock Text="View" Style="{StaticResource Label}" Margin="0,0,6,0" />
+                    <ComboBox x:Name="ViewportCombo" SelectedIndex="0" Width="52" Margin="0,2,14,2" SelectionChanged="ViewportCombo_SelectionChanged"
                               ToolTip="Whose screen group to show: elements whose top-level Viewport is this or 0.">
                         <ComboBoxItem>1</ComboBoxItem>
                         <ComboBoxItem>2</ComboBoxItem>
                         <ComboBoxItem>3</ComboBoxItem>
                         <ComboBoxItem>4</ComboBoxItem>
                     </ComboBox>
-
-                    <CheckBox x:Name="RoundingBox" Content="Unit snapping" Foreground="#999" VerticalAlignment="Center" Margin="16,0,0,0"
-                              Checked="Option_Changed" Unchecked="Option_Changed"
-                              ToolTip="The draw snaps every element to a whole interface unit (1/640 of the width, 2 pixels at 1280 wide). The stock game always does; GameExt's HudSubPixel, on by default, turns it off. Switching game resets this to that game's default." />
-                    <CheckBox x:Name="ShowPlaceholdersBox" Content="Placeholders" IsChecked="True" Foreground="#999" VerticalAlignment="Center" Margin="12,0,0,0"
-                              Checked="Option_Changed" Unchecked="Option_Changed"
-                              ToolTip="Outline elements that draw nothing here: missing textures, bitmaps without a BitmapRect, maps, targets and lists." />
-                    <CheckBox x:Name="GuidesBox" Content="Guides" IsChecked="True" Foreground="#999" VerticalAlignment="Center" Margin="12,0,0,0"
-                              Checked="Option_Changed" Unchecked="Option_Changed"
-                              ToolTip="The stock band a wide screen squashes the HUD into, or for a file GameExt lays out, its layout's thirds and how far each moves." />
-
-                    <TextBlock Text="Zoom:" Foreground="#999" VerticalAlignment="Center" Margin="16,0,6,0" />
-                    <TextBlock x:Name="ZoomText" Text="100%" Foreground="#ddd" VerticalAlignment="Center" MinWidth="44" />
-                    <Button Content="Fit" Click="Fit_Click" Padding="8,1" Margin="4,0,0,0" ToolTip="Fit the screen in the view. Ctrl+Wheel zooms." />
-                    <Button Content="1:1" Click="ActualSize_Click" Padding="8,1" Margin="4,0,0,0" ToolTip="One screen pixel to one display pixel." />
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                    <TextBlock x:Name="LayoutInfoText" Foreground="#8fb8de" VerticalAlignment="Center" Margin="0,0,16,0"
-                               FontFamily="Consolas, Cascadia Mono, Menlo, monospace" />
-
-                    <CheckBox x:Name="ShowHiddenBox" Content="Show hidden" Foreground="#999" VerticalAlignment="Center" Margin="0,0,16,0"
-                              Checked="Option_Changed" Unchecked="Option_Changed"
-                              ToolTip="While simulating events, draw the elements their events have not enabled faintly, so they can still be picked." />
-
-                    <CheckBox x:Name="ReferenceBox" Content="Reference" IsEnabled="False" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0"
-                              Checked="Option_Changed" Unchecked="Option_Changed"
-                              ToolTip="Show the reference image loaded with File &gt; Load reference image, stretched across the screen. It is never saved into a .hud file." />
-                    <Slider x:Name="ReferenceOpacitySlider" Minimum="0.1" Maximum="1.0" Value="0.5" Width="70" VerticalAlignment="Center"
-                            IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" ValueChanged="ReferenceSlider_Changed"
-                            ToolTip="The reference image's opacity." />
-                    <CheckBox x:Name="ReferenceOnTopBox" Content="On top" Foreground="#999" VerticalAlignment="Center" Margin="6,0,16,0"
-                              IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" Checked="Option_Changed" Unchecked="Option_Changed"
-                              ToolTip="Draw the reference image over the HUD instead of under it, to compare edges." />
-
-                    <TextBlock Text="Text:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <ComboBox x:Name="TextPreviewCombo" SelectedIndex="0" Width="90" Margin="0,0,16,0" SelectionChanged="TextPreviewCombo_SelectionChanged"
-                              ToolTip="What text elements show before their events are simulated. Examples: what the game would typically put there, and the strings of the keys. Long: long names, large numbers and paragraphs, to see how a box holds them. Keys: the keys and event names the file names.">
+                    <TextBlock Text="Text" Style="{StaticResource Label}" Margin="0,0,6,0" />
+                    <ComboBox x:Name="TextPreviewCombo" SelectedIndex="0" Width="96" Margin="0,2,14,2" SelectionChanged="TextPreviewCombo_SelectionChanged"
+                              ToolTip="What text elements show before an event sets them. Examples: what the game would typically put there, and the strings of the keys. Long: long names, large numbers and paragraphs, to see how a box holds them. Keys: the keys and event names the file names.">
                         <ComboBoxItem Content="Examples" />
                         <ComboBoxItem Content="Long" />
                         <ComboBoxItem Content="Keys" />
                     </ComboBox>
 
-                    <TextBlock Text="HUD scale:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0" />
-                    <Slider x:Name="HudScaleSlider" Minimum="0.5" Maximum="1.5" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="True"
-                            Width="90" VerticalAlignment="Center" ValueChanged="Slider_Changed"
-                            ToolTip="The runtime HUD scale (ScriptCB_SetHUDScale, set by the video options). It resizes only elements with Scalable(1), keeping their positions." />
-                    <TextBlock x:Name="HudScaleLabel" Text="1.00" Foreground="#ddd" VerticalAlignment="Center" MinWidth="32" Margin="4,0,12,0" />
+                    <CheckBox x:Name="RoundingBox" Content="Snap" Style="{StaticResource Chip}" Margin="0,2,4,2"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="The draw snaps every element to a whole interface unit (1/640 of the width, 2 pixels at 1280 wide). The stock game always does; GameExt's HudSubPixel, on by default, turns it off. Switching game resets this to that game's default." />
+                    <CheckBox x:Name="ShowPlaceholdersBox" Content="Outlines" IsChecked="True" Style="{StaticResource Chip}" Margin="0,2,4,2"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Outline elements that draw nothing here: missing textures, bitmaps without a BitmapRect, and the code-drawn elements' boxes." />
+                    <CheckBox x:Name="GuidesBox" Content="Guides" IsChecked="True" Style="{StaticResource Chip}" Margin="0,2,4,2"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="The stock band a wide screen squashes the HUD into, or for a file GameExt lays out, its layout's thirds and how far each moves; and the boxes of texts." />
+                    <CheckBox x:Name="ShowHiddenBox" Content="Hidden" Style="{StaticResource Chip}" Margin="0,2,14,2"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="With the game's showing and hiding on, draw the elements their events have not enabled faintly, so they can still be picked." />
 
-                    <TextBlock Text="Model size ×:" Foreground="#999" VerticalAlignment="Center" Margin="0,0,4,0" />
-                    <Slider x:Name="MeshFactorSlider" Minimum="0.1" Maximum="5.0" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="False"
-                            Width="90" VerticalAlignment="Center" ValueChanged="Slider_Changed"
-                            ToolTip="Model3D sizes are still estimated (a mesh unit drawn as 1/7 of the width); positions are the game's. Tune this until models match their bitmaps." />
-                    <TextBlock x:Name="MeshFactorLabel" Text="1.00" Foreground="#ddd" VerticalAlignment="Center" MinWidth="32" Margin="4,0,0,0" />
-                </StackPanel>
-            </StackPanel>
+                    <CheckBox x:Name="ReferenceBox" Content="Reference" IsEnabled="False" Style="{StaticResource Chip}" Margin="0,2,6,2"
+                              Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Show the reference image loaded with File &gt; Load reference image, stretched across the screen. It is never saved into a .hud file." />
+                    <Slider x:Name="ReferenceOpacitySlider" Minimum="0.1" Maximum="1.0" Value="0.5" Width="64" VerticalAlignment="Center" Margin="0,2,6,2"
+                            IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" ValueChanged="ReferenceSlider_Changed"
+                            ToolTip="The reference image's opacity." />
+                    <CheckBox x:Name="ReferenceOnTopBox" Content="On top" Style="{StaticResource Chip}" Margin="0,2,14,2"
+                              IsEnabled="{Binding IsChecked, ElementName=ReferenceBox}" Checked="Option_Changed" Unchecked="Option_Changed"
+                              ToolTip="Draw the reference image over the HUD instead of under it, to compare edges." />
+
+                    <!-- Rarely changed: in a popup. A click on the button while it is open only closes it. -->
+                    <ToggleButton x:Name="MoreButton" ToolTip="HUD scale and model size" Margin="0,2,0,2"
+                                  IsHitTestVisible="{Binding IsOpen, ElementName=MorePopup, Converter={StaticResource NotBool}}">
+                        <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="13" />
+                    </ToggleButton>
+                    <Popup x:Name="MorePopup" IsOpen="{Binding IsChecked, ElementName=MoreButton}" PlacementTarget="{Binding ElementName=MoreButton}"
+                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade"
+                           Closed="MorePopup_Closed">
+                        <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                                CornerRadius="6" Padding="12,10" Margin="0,4,0,0" Width="280">
+                            <StackPanel>
+                                <DockPanel>
+                                    <TextBlock x:Name="HudScaleLabel" DockPanel.Dock="Right" Text="1.00" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="HUD scale" Style="{StaticResource Label}" />
+                                </DockPanel>
+                                <Slider x:Name="HudScaleSlider" Minimum="0.5" Maximum="1.5" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                        ValueChanged="Slider_Changed" Margin="0,4,0,0"
+                                        ToolTip="The runtime HUD scale (ScriptCB_SetHUDScale, set by the video options). It resizes only elements with Scalable(1), keeping their positions." />
+                                <TextBlock Text="Resizes the elements with Scalable(1), as the game's video option does." Foreground="{StaticResource TextMutedBrush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,2,0,10" />
+                                <DockPanel>
+                                    <TextBlock x:Name="MeshFactorLabel" DockPanel.Dock="Right" Text="1.00" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="Model size" Style="{StaticResource Label}" />
+                                </DockPanel>
+                                <Slider x:Name="MeshFactorSlider" Minimum="0.1" Maximum="5.0" Value="1.0" TickFrequency="0.05" IsSnapToTickEnabled="False"
+                                        ValueChanged="Slider_Changed" Margin="0,4,0,0"
+                                        ToolTip="A factor on the size Model3D meshes are drawn at." />
+                                <TextBlock x:Name="MeshFactorNote" Text="Model3D sizes are estimated: tune this until models match their bitmaps."
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                </WrapPanel>
+            </DockPanel>
+        </Border>
+        <!-- How the selection's file is laid out. -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource CanvasBrush}" Padding="10,4">
+            <TextBlock x:Name="LayoutInfoText" Foreground="{StaticResource TextMutedBrush}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                       TextTrimming="CharacterEllipsis" />
         </Border>
         <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                      Background="#181818" PreviewMouseWheel="Scroller_PreviewMouseWheel">
+                      Background="{StaticResource CanvasBrush}" PreviewMouseWheel="Scroller_PreviewMouseWheel"
+                      PreviewMouseDown="Scroller_PreviewMouseDown" PreviewMouseMove="Scroller_PreviewMouseMove"
+                      PreviewMouseUp="Scroller_PreviewMouseUp" LostMouseCapture="Scroller_LostMouseCapture">
             <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Margin="40">
-                <Border x:Name="ViewportFrame" BorderBrush="#404040" BorderThickness="1">
+                <Border x:Name="ViewportFrame" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1">
                     <Border.LayoutTransform>
                         <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
                     </Border.LayoutTransform>
@@ -97,14 +133,14 @@
                         <DrawingBrush TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
                             <DrawingBrush.Drawing>
                                 <DrawingGroup>
-                                    <GeometryDrawing Brush="#2a2e33">
+                                    <GeometryDrawing Brush="#22262B">
                                         <GeometryDrawing.Geometry>
                                             <RectangleGeometry Rect="0,0,20,20" />
                                         </GeometryDrawing.Geometry>
                                     </GeometryDrawing>
                                     <GeometryDrawing>
                                         <GeometryDrawing.Pen>
-                                            <Pen Brush="#353a40" Thickness="1" />
+                                            <Pen Brush="#2C3137" Thickness="1" />
                                         </GeometryDrawing.Pen>
                                         <GeometryDrawing.Geometry>
                                             <GeometryGroup>

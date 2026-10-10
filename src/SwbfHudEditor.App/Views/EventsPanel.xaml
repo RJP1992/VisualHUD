@@ -1,78 +1,70 @@
 <UserControl x:Class="SwbfHudEditor.App.Views.EventsPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="#252a30">
+             Background="{StaticResource PanelBrush}">
     <DockPanel>
-        <StackPanel DockPanel.Dock="Top" Margin="6,6,6,4">
-            <CheckBox x:Name="SimulateBox" Content="Show and hide as the game does" Foreground="#d4e8ff"
+        <StackPanel DockPanel.Dock="Top" Margin="10,10,10,6">
+            <CheckBox x:Name="SimulateBox" Content="Show and hide as the game does" Foreground="{StaticResource TextBrush}"
                       Checked="SimulateBox_Changed" Unchecked="SimulateBox_Changed"
                       ToolTip="Off: every element shows, but those you untick in the Elements tree, and the events you send set values, texts, colours, textures, models and positions straight away. On: an element shows only once its EventEnable event has been sent after its EventDisable one, and only while every group above it shows, as in the game." />
-            <WrapPanel Margin="0,6,0,0">
-                <Button Content="Initialize" Click="Initialize_Click" Padding="8,1" Margin="0,0,4,4"
+            <WrapPanel Margin="0,8,0,2">
+                <Button Content="Initialize" Click="Initialize_Click" Margin="0,0,4,4"
                         ToolTip="Send &quot;initialize&quot;, as the HUD does when it starts." />
-                <Button Content="On foot" Click="OnFoot_Click" Padding="8,1" Margin="0,0,4,4"
+                <Button Content="On foot" Click="OnFoot_Click" Margin="0,0,4,4"
                         ToolTip="Send what the game would have by now for a soldier spawned on foot: initialize, spawn, weapons, full health and energy, ammo, the reticule, team reinforcements." />
-                <Button Content="Show selected" Click="ShowSelected_Click" Padding="8,1" Margin="0,0,4,4"
+                <Button Content="Show selected" Click="ShowSelected_Click" Margin="0,0,4,4"
                         ToolTip="Send the EventEnable events of the selected elements and the groups above them." />
-                <Button Content="Clear" Click="Clear_Click" Padding="8,1" Margin="0,0,4,4"
+                <Button Content="Clear" Click="Clear_Click" Margin="0,0,4,4"
                         ToolTip="Forget every event sent: every element is back in its load state, and, with the game's showing and hiding, hidden again." />
             </WrapPanel>
-            <TextBox x:Name="FilterBox" Margin="0,2,0,0" TextChanged="FilterBox_TextChanged"
-                     ToolTip="Show events whose name contains this." />
-            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). What it sets shows at once; it shows or hides elements only with the box above ticked." Foreground="#888"
-                       FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <Grid Margin="0,2,0,0">
+                <TextBox x:Name="FilterBox" Padding="24,3,6,3" TextChanged="FilterBox_TextChanged"
+                         ToolTip="Show events whose name contains this." />
+                <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="11" HorizontalAlignment="Left" Margin="8,0,0,0"
+                           Foreground="{StaticResource TextMutedBrush}" IsHitTestVisible="False" />
+            </Grid>
+            <TextBlock Text="Type a value and press Enter, or Send to send it again (it then counts as the latest). What it sets shows at once; it shows or hides elements only with the box above ticked." Foreground="{StaticResource TextMutedBrush}"
+                       FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
         </StackPanel>
-        <ListView x:Name="EventList" Background="#1e2227" Foreground="#d4e8ff" BorderThickness="0"
-                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                  ScrollViewer.HorizontalScrollBarVisibility="Auto">
-            <ListView.ItemContainerStyle>
-                <Style TargetType="ListViewItem">
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <ListBox x:Name="EventList" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.ScrollUnit="Pixel">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
                     <Setter Property="ToolTip" Value="{Binding Details}" />
+                    <Setter Property="Padding" Value="10,5,10,6" />
                 </Style>
-            </ListView.ItemContainerStyle>
-            <ListView.View>
-                <GridView>
-                    <GridViewColumn Header="#" Width="34">
-                        <GridViewColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Order}" Foreground="#ffb347" />
-                            </DataTemplate>
-                        </GridViewColumn.CellTemplate>
-                    </GridViewColumn>
-                    <GridViewColumn Header="Event" Width="230">
-                        <GridViewColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Name}" FontFamily="Consolas, Cascadia Mono, Menlo, monospace" Foreground="{Binding NameBrush}" />
-                            </DataTemplate>
-                        </GridViewColumn.CellTemplate>
-                    </GridViewColumn>
-                    <GridViewColumn Header="Type" Width="56" DisplayMemberBinding="{Binding TypeName}" />
-                    <GridViewColumn Header="Value" Width="150">
-                        <GridViewColumn.CellTemplate>
-                            <DataTemplate>
-                                <ComboBox IsEditable="True" Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}"
-                                          ItemsSource="{Binding Suggestions}" MinWidth="120" KeyDown="Value_KeyDown"
-                                          SelectionChanged="Value_SelectionChanged" />
-                            </DataTemplate>
-                        </GridViewColumn.CellTemplate>
-                    </GridViewColumn>
-                    <GridViewColumn Header="" Width="52">
-                        <GridViewColumn.CellTemplate>
-                            <DataTemplate>
-                                <Button Content="Send" Click="Send_Click" Padding="6,0" />
-                            </DataTemplate>
-                        </GridViewColumn.CellTemplate>
-                    </GridViewColumn>
-                    <GridViewColumn Header="Now" Width="120">
-                        <GridViewColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Current}" Foreground="#9fd49f" />
-                            </DataTemplate>
-                        </GridViewColumn.CellTemplate>
-                    </GridViewColumn>
-                </GridView>
-            </ListView.View>
-        </ListView>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="{Binding Order}" Foreground="{StaticResource WarningBrush}" MinWidth="22" FontSize="11"
+                                   VerticalAlignment="Center" ToolTip="The order in which it was sent." />
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontFamily="{StaticResource MonoFont}" Foreground="{Binding NameBrush}"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding TypeName}" Foreground="{StaticResource TextMutedBrush}" FontSize="11"
+                                   Margin="8,0,0,0" VerticalAlignment="Center" />
+                        <DockPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0" LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="Send" Click="Send_Click" Padding="10,1" Margin="6,0,0,0"
+                                    ToolTip="Send it again with this value." />
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Current}" Foreground="{StaticResource SuccessBrush}"
+                                       FontSize="11" Margin="8,0,0,0" MaxWidth="110" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" ToolTip="The value it has now." />
+                            <ComboBox IsEditable="True" Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}"
+                                      ItemsSource="{Binding Suggestions}" KeyDown="Value_KeyDown"
+                                      SelectionChanged="Value_SelectionChanged" />
+                        </DockPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
     </DockPanel>
 </UserControl>

@@ -161,6 +161,33 @@ public static class HudBlockTemplates
         };
     }
 
+    /// <summary>
+    /// Why <paramref name="block"/>, pasted or dragged, cannot go into <paramref name="container"/> (null:
+    /// the top of <paramref name="document"/>), or null when it can: the same rules as a new block of
+    /// its kind. A template of an element, such as a map's <c>BackdropSmall</c>, goes only back into an
+    /// element of that kind.
+    /// </summary>
+    public static string? WhyNot(HudBlock block, HudBlock? container, HudDocument document)
+    {
+        if (!block.HasBody) return $"{block.Name} is a line: it goes into an element's properties.";
+        if (Find(block.Name) is { } template)
+        {
+            if (template.Keyword != "FileInfo") return WhyNot(template, container, document);
+            // Moving a file's own FileInfo within it is fine; a second one is not.
+            if (container is not null) return "FileInfo goes at the top of its file.";
+            return document.TopLevel.Any(b => !ReferenceEquals(b, block) && b.HasBody &&
+                                              b.Name.Equals("FileInfo", StringComparison.OrdinalIgnoreCase))
+                ? "The file has a FileInfo already. The game reads one, at the top of the file."
+                : null;
+        }
+        // A template or sub-scope: only where it was, in an element of the kind that reads it.
+        return container is not null && ElementKinds.TryGet(container, out _) &&
+               (container.Children.Contains(block) ||
+                PropertyCatalog.GetAddable(container).Any(d => d.IsBlock && d.Name.Equals(block.Name, StringComparison.OrdinalIgnoreCase)))
+            ? null
+            : $"{block.Name} is a template of an element: it goes only into an element that reads it.";
+    }
+
     private static bool IsViewPort(HudBlock block) =>
         block.HasBody && block.Name.Equals("ViewPort", StringComparison.OrdinalIgnoreCase);
 

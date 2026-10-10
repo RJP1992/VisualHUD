@@ -27,7 +27,8 @@ public static class HudWriter
         public void Block(HudBlock block, int depth)
         {
             var trivia = block.Trivia;
-            Lines(trivia?.Before);
+            var reindent = trivia?.Reindent == true;
+            Lines(trivia?.Before, reindent ? Depth(depth) : null);
             var header = Header(block);
             // As written, while the line is as it was read.
             if (trivia?.RawHeader is { } raw && trivia.HeaderAsRead == header) header = raw;
@@ -36,15 +37,22 @@ public static class HudWriter
             Line(trivia?.OpenIndent ?? Depth(depth), "{" + trivia?.AfterOpen);
             foreach (var child in block.Children)
                 if (omit?.Invoke(child) != true) Block(child, depth + 1);
-            Lines(trivia?.BeforeClose);
+            Lines(trivia?.BeforeClose, reindent ? Depth(depth + 1) : null);
             Line(trivia?.CloseIndent ?? Depth(depth), "}" + trivia?.AfterClose);
         }
 
-        /// <summary>Whole lines kept from the file, written as they were.</summary>
-        public void Lines(List<string>? lines)
+        /// <summary>
+        /// Whole lines kept from the file, written as they were, or at <paramref name="indent"/> for a
+        /// block that moved.
+        /// </summary>
+        public void Lines(List<string>? lines, string? indent = null)
         {
             if (lines is null) return;
-            foreach (var line in lines) Line(string.Empty, line);
+            foreach (var line in lines)
+            {
+                if (indent is not null && line.Trim().Length > 0) Line(indent, line.TrimStart());
+                else Line(string.Empty, indent is not null ? string.Empty : line);
+            }
         }
 
         private string Depth(int depth) => depth == 0 ? string.Empty : string.Concat(Enumerable.Repeat(indent, depth));

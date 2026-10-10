@@ -408,6 +408,15 @@ public static class PropertyCatalog
                 if (def.Group == group && chosen.Contains(def)) yield return def;
     }
 
+    /// <summary>What the game reads a <paramref name="name"/> line in <paramref name="target"/> as: its group and description, or null.</summary>
+    public static PropertyDef? Find(HudBlock target, HudBlock? parent, string name)
+    {
+        var readers = ReadersOf(target, parent);
+        return All.Where(d => readers.Contains(d.Reader) && d.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(d => readers.IndexOf(d.Reader))
+            .FirstOrDefault();
+    }
+
     /// <summary>The classes whose ReadData reads a block's lines, the subclass first.</summary>
     private static List<string> ReadersOf(HudBlock target, HudBlock? parent)
     {

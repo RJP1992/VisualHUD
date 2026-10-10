@@ -4,6 +4,10 @@
     <ProjectReference Include="..\SwbfHudEditor.Core\SwbfHudEditor.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SwbfHudEditor.App.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>

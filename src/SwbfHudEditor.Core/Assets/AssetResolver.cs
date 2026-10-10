@@ -62,6 +62,33 @@ public sealed class AssetResolver
         return InFolders(f => f.Localizations, language);
     }
 
+    /// <summary>
+    /// The localization files the game ends up with, in the order they lay over each other: each
+    /// <c>Localize</c> folder from the stock one to the HUD's own, its <c>language.cfg</c> and then
+    /// the PC build's <c>PC\language.cfg</c>, which the munger lays over it. Without a Localize
+    /// folder, the first file an asset folder has.
+    /// </summary>
+    public IReadOnlyList<string> FindLocalizationLayers(string language = "english")
+    {
+        var layers = new List<string>();
+        for (var i = _localizeRoots.Count - 1; i >= 0; i--)
+        {
+            var root = _localizeRoots[i];
+            if (FileIn(root, language + ".cfg") is { } main) layers.Add(main);
+            if (FileIn(Path.Combine(root, "PC"), language + ".cfg") is { } pc) layers.Add(pc);
+        }
+        if (layers.Count == 0 && InFolders(f => f.Localizations, language) is { } found) layers.Add(found);
+        return layers;
+    }
+
+    /// <summary>A file of this name in a folder, whatever its case (<c>PC\English.cfg</c>).</summary>
+    private static string? FileIn(string folder, string name)
+    {
+        if (!Directory.Exists(folder)) return null;
+        return Directory.EnumerateFiles(folder, "*.cfg")
+            .FirstOrDefault(f => Path.GetFileName(f).Equals(name, StringComparison.OrdinalIgnoreCase));
+    }
+
     public string? FindTexture(string textureName) =>
         InRoots(_textureRoots, "*.tga", _textureIndex, textureName) ?? InFolders(f => f.Textures, textureName);
 

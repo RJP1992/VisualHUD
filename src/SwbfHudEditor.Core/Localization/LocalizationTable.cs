@@ -14,12 +14,22 @@ namespace SwbfHudEditor.Core.Localization;
 public sealed class LocalizationTable
 {
     private readonly Dictionary<string, string> _strings;
+    // The file each string was last set by, as an index into Files.
+    private readonly Dictionary<string, int>? _source;
 
-    private LocalizationTable(Dictionary<string, string> strings) { _strings = strings; }
+    private LocalizationTable(Dictionary<string, string> strings, Dictionary<string, int>? source = null)
+    {
+        _strings = strings;
+        _source = source;
+    }
 
     public int Count => _strings.Count;
 
     public string? TryGet(string key) => _strings.TryGetValue(key, out var s) ? s : null;
+
+    /// <summary>The file a key's string comes from: the last of <see cref="Files"/> that sets it.</summary>
+    public string? SourceOf(string key) =>
+        _source is not null && _source.TryGetValue(key, out var i) && i < Files.Count ? Files[i] : null;
 
     private Dictionary<uint, string>? _byHash;
 
@@ -37,24 +47,44 @@ public sealed class LocalizationTable
         return _byHash.TryGetValue(hash, out var s) ? s : null;
     }
 
-    public static LocalizationTable LoadFromCfg(string path)
+    public static LocalizationTable LoadFromCfg(string path) => LoadLayered(new[] { path });
+
+    /// <summary>
+    /// The strings of several <c>.cfg</c> files, a later file's string replacing an earlier one's for
+    /// the same key: the stock localization, its <c>PC</c> overrides, then a mod's, as the game ends
+    /// up with them.
+    /// </summary>
+    public static LocalizationTable LoadLayered(IEnumerable<string> paths)
     {
-        var src = File.ReadAllText(path);
-        var doc = HudParser.Parse(src, path);
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var top in doc.TopLevel)
-            Walk(top, string.Empty, map);
-        return new LocalizationTable(map);
+        var source = new Dictionary<string, int>(StringComparer.Ordinal);
+        var files = new List<string>();
+        foreach (var path in paths)
+        {
+            var doc = HudParser.Parse(File.ReadAllText(path), path);
+            var index = files.Count;
+            foreach (var top in doc.TopLevel)
+                Walk(top, string.Empty, (key, value) =>
+                {
+                    map[key] = value;
+                    source[key] = index;
+                });
+            files.Add(path);
+        }
+        return new LocalizationTable(map, source) { Files = files };
     }
+
+    /// <summary>The files the strings were read from, in the order they were laid over each other.</summary>
+    public IReadOnlyList<string> Files { get; private init; } = Array.Empty<string>();
 
     public static LocalizationTable Empty() => new(new Dictionary<string, string>());
 
-    private static void Walk(HudBlock block, string prefix, Dictionary<string, string> map)
+    private static void Walk(HudBlock block, string prefix, Action<string, string> set)
     {
         switch (block.Name)
         {
             case "DataBase":
-                foreach (var c in block.Children) Walk(c, prefix, map);
+                foreach (var c in block.Children) Walk(c, prefix, set);
                 break;
 
             case "VarScope":
@@ -62,7 +92,7 @@ public sealed class LocalizationTable
                 {
                     var name = block.Arguments[0].AsString();
                     var newPrefix = prefix.Length == 0 ? name : $"{prefix}.{name}";
-                    foreach (var c in block.Children) Walk(c, newPrefix, map);
+                    foreach (var c in block.Children) Walk(c, newPrefix, set);
                 }
                 break;
 
@@ -72,7 +102,7 @@ public sealed class LocalizationTable
                     var name = block.Arguments[0].AsString();
                     var key = prefix.Length == 0 ? name : $"{prefix}.{name}";
                     var decoded = Decode(block);
-                    if (decoded is not null) map[key] = decoded;
+                    if (decoded is not null) set(key, decoded);
                 }
                 break;
         }

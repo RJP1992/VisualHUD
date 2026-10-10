@@ -459,8 +459,9 @@ public partial class MainWindow : Window
         _assetListStale = true;
         if (!AssetsTab.IsSelected) return;
         _assetListStale = false;
-        var strings = _localization is { } table ? key => table.TryGet(key) is not null : (Func<string, bool>?)null;
-        AssetsList.ShowAssets(_files.Count == 0 || _assets is null ? null : HudAssets.Check(Documents, _assets, _meshTextures, strings));
+        var strings = _localization is { } table ? key => table.TryGet(key) is not null ? table.SourceOf(key) : null : (Func<string, string?>?)null;
+        AssetsList.ShowAssets(_files.Count == 0 || _assets is null ? null
+            : HudAssets.Check(Documents, _assets, _meshTextures, strings, _localization?.Files));
     }
 
     private void LeftTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1605,11 +1606,15 @@ public partial class MainWindow : Window
         return current;
     }
 
+    /// <summary>
+    /// The English strings as the game ends up with them: the stock localization, its PC overrides,
+    /// then each mod's and its PC overrides, a later file's string replacing an earlier one's.
+    /// </summary>
     internal static LocalizationTable? TryLoadLocalization(AssetResolver assets)
     {
-        var path = assets.FindLocalizationCfg("english");
-        if (path is null) return null;
-        try { return LocalizationTable.LoadFromCfg(path); }
+        var layers = assets.FindLocalizationLayers("english");
+        if (layers.Count == 0) return null;
+        try { return LocalizationTable.LoadLayered(layers); }
         catch { return null; }
     }
 

@@ -119,7 +119,7 @@ public sealed class AssetFolderTests : IDisposable
 
         // With one, each key is found or missing: the game shows a missing key as itself.
         Touch(@"mod\Common\Localize\english.cfg");
-        var withStrings = HudAssets.Check(new[] { doc }, AssetResolver.ForHudFile(hudPath), hasString: key => key != "level.key");
+        var withStrings = HudAssets.Check(new[] { doc }, AssetResolver.ForHudFile(hudPath), findString: key => key != "level.key" ? "english.cfg" : null);
         Assert.Null(withStrings.Single(a => a.Kind == HudAssetKind.String && a.Name == "level.key").Path);
     }
 }

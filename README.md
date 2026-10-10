@@ -57,6 +57,11 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
 (the `hud` folder and its `Common` folder's `interface`, `effects`, `mshs`, `fonts` and
 `Localize`), then in `C:\BF2_ModTools\data\Common`, then in the asset folders.
 
+The strings are the ones the game ends up with: the stock `Localize\english.cfg`, then the PC
+build's `Localize\PC\English.cfg` over it, then the mod's own two the same way (for a file in
+`data_BF3\Common\hud`, `data_BF3\Common\Localize`), a later file's string replacing an earlier
+one's for the same key.
+
 - **Searched automatically:** the data folder of the mod each open file belongs to, with all
   its subfolders (all of `data_BF3`, its `Sides` and `Load` included, for a file in
   `data_BF3\Common\hud`), then the stock `C:\BF2_ModTools\data`. This needs the mod tools'
@@ -72,8 +77,8 @@ Textures, meshes, fonts and the English localization are looked up in the HUD's 
   - textures: `Bitmap` and `Mask` lines, and the textures of the models found;
   - meshes: `Mesh`, `MeshInfo`, and the transforms' `NameMesh` rows;
   - fonts: `TextFont`, a `.fff` file;
-  - strings: the `Text` keys, found in the localization or missing;
-  - the localization file.
+  - strings: the `Text` keys, missing or with the file their string comes from;
+  - the localization files, in the order they lie over each other.
 - **Rescan** reads the folders again after files were added to them; the × removes an added
   folder.
 - Textures are `.tga` files and models `.msh` files, as the game's munge reads them; a `.png`

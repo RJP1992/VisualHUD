@@ -8,6 +8,8 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // The tests make the application for its theme and open their own windows.
+        if (Environment.GetEnvironmentVariable("VISUALHUD_TESTS") == "1") return;
         if (Snapshot.TryRun(e.Args, out var exitCode))
         {
             Shutdown(exitCode);

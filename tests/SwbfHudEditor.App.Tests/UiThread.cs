@@ -21,6 +21,8 @@ public static class UiThread
         Environment.SetEnvironmentVariable("VISUALHUD_SETTINGS", Path.Combine(scratch, "settings.json"));
         Environment.SetEnvironmentVariable("VISUALHUD_NO_SCAN", "1");
         Environment.SetEnvironmentVariable("VISUALHUD_NO_WATCH", "1");
+        // No main window and no first-start question from the application's own start.
+        Environment.SetEnvironmentVariable("VISUALHUD_TESTS", "1");
         Dispatcher? dispatcher = null;
         using var ready = new ManualResetEventSlim();
         var thread = new Thread(() =>

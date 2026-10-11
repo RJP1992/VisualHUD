@@ -7,7 +7,7 @@
         xmlns:views="clr-namespace:SwbfHudEditor.App.Views"
         xmlns:local="clr-namespace:SwbfHudEditor.App"
         mc:Ignorable="d"
-        Title="VisualHUD" Height="900" Width="1560" MinWidth="900" MinHeight="560"
+        Title="VisualHUD" Height="900" Width="1560" MinWidth="900" MinHeight="560" Icon="pack://application:,,,/VisualHUD;component/Theme/VisualHUD.ico"
         Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
         FontFamily="{StaticResource UiFont}" FontSize="{StaticResource UiFontSize}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
@@ -213,6 +213,11 @@
                 <Separator />
                 <MenuItem Header="Expand all rows" Click="ExpandAll_Click" />
                 <MenuItem Header="Collapse all rows" Click="CollapseAll_Click" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Guide" Click="Guide_Click" InputGestureText="F1"
+                          ToolTip="How the editor works, and how a HUD is put together." />
+                <MenuItem Header="_About VisualHUD" Click="About_Click" />
             </MenuItem>
         </Menu>
 

@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Threading;
 
 namespace SwbfHudEditor.App;
 
@@ -13,6 +14,10 @@ public partial class App : Application
             return;
         }
         if (UiSnapshot.TryRun(e.Args, this)) return;
-        new MainWindow().Show();
+        var window = new MainWindow();
+        window.Show();
+        // The first start asks where the mod tools are, once the window is up.
+        if (window.FirstStart)
+            window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => window.AskModTools(firstStart: true));
     }
 }

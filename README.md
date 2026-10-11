@@ -20,10 +20,16 @@ To work on the editor you need the .NET 8 SDK (or newer) on Windows.
 dotnet build SwbfHudEditor.sln
 ```
 
-Then run `VisualHUD.bat`, or `src/SwbfHudEditor.App/bin/Debug/net8.0-windows/VisualHUD.exe`
-with one or more `.hud` files as arguments. Textures, models, fonts, the transforms files and
-the English localization are looked up next to the files and in `C:\BF2_ModTools\data\Common`,
-then in any asset folders you add (see [Assets](#assets)).
+Then run `src/SwbfHudEditor.App/bin/Debug/net8.0-windows/VisualHUD.exe`, with one or more
+`.hud` files as arguments if you like. Textures, models, fonts, the transforms files and the
+English localization are looked up next to the files and in the mod tools' `data\Common`, then
+in any asset folders you add (see [Assets](#assets)).
+
+On its first start the editor asks where the Battlefront II mod tools are: the `BF2_ModTools`
+folder, which it looks for at the root of each drive to start with (picking a folder inside it,
+such as `data` or a mod's `data_ABC`, comes to the same). The stock HUD files, textures, models,
+fonts and strings are read from its `data` folder. **File > Mod tools folder** changes it later.
+Without the mod tools, a HUD shows what its own folders and the asset folders hold.
 
 ```bash
 dotnet test SwbfHudEditor.sln
@@ -74,7 +80,7 @@ by its own `FileInfo`. The editor works on such a set:
 
 Textures, meshes, fonts and the English localization are looked up in the HUD's own folders
 (the `hud` folder and its `Common` folder's `interface`, `effects`, `mshs`, `fonts` and
-`Localize`), then in `C:\BF2_ModTools\data\Common`, then in the asset folders.
+`Localize`), then in the mod tools' `data\Common`, then in the asset folders.
 
 The strings are the ones the game ends up with: the stock `Localize\english.cfg`, then the PC
 build's `Localize\PC\English.cfg` over it, then the mod's own two the same way (for a file in
@@ -83,13 +89,13 @@ one's for the same key.
 
 - **Searched automatically:** the data folder of the mod each open file belongs to, with all
   its subfolders (all of `data_BF3`, its `Sides` and `Load` included, for a file in
-  `data_BF3\Common\hud`), then the stock `C:\BF2_ModTools\data`. This needs the mod tools'
+  `data_BF3\Common\hud`), then the mod tools' own `data`. This needs the mod tools'
   `<data>\Common\hud` layout; a file elsewhere gets no automatic folder.
 - **File > Add asset folder** adds more folders, searched the same way after those, for
   whatever none of them has. A name found in several places resolves to the first path in
   alphabetical order.
 - Added folders are remembered in `%LOCALAPPDATA%\VisualHUD\settings.json`. Every folder is
-  read in the background, once per session. A large folder (all of `C:\BF2_ModTools` is about
+  read in the background, once per session. A large folder (all of `BF2_ModTools` is about
   450,000 files) takes some seconds.
 - The **Assets** tab lists what the open files name, where each was found, or that it is
   missing, and what uses it:

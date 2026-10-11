@@ -169,8 +169,8 @@ internal static class HudFileSet
             if (!result.Contains(full, PathComparer) && !own.Contains(full, PathComparer)) result.Add(full);
         }
 
-        var stock = Path.Combine(MainWindow.DefaultHudFolder, "hudtransforms.hud");
-        if (!folders.Any(f => File.Exists(Path.Combine(f, "hudtransforms.hud"))) && File.Exists(stock)) Add(stock);
+        var stock = ModTools.HudFolder is { } hud ? Path.Combine(hud, "hudtransforms.hud") : null;
+        if (stock is not null && !folders.Any(f => File.Exists(Path.Combine(f, "hudtransforms.hud"))) && File.Exists(stock)) Add(stock);
         foreach (var folder in folders)
         {
             var main = Path.Combine(folder, "hudtransforms.hud");

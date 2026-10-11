@@ -21,8 +21,6 @@ namespace SwbfHudEditor.App;
 
 public partial class MainWindow : Window
 {
-    internal const string DefaultHudFolder = @"C:\BF2_ModTools\data\Common\hud";
-    internal const string StockDataCommon = @"C:\BF2_ModTools\data\Common";
     private const string HudFilter = "HUD files (*.hud)|*.hud|All files (*.*)|*.*";
 
     // Custom RoutedCommands so keybindings work regardless of which sub-control has focus.
@@ -358,7 +356,7 @@ public partial class MainWindow : Window
 
     private string? StartFolder() =>
         UserFiles.Select(f => Path.GetDirectoryName(f.FilePath)).FirstOrDefault(Directory.Exists)
-        ?? (Directory.Exists(DefaultHudFolder) ? DefaultHudFolder : null);
+        ?? (ModTools.HudFolder is { } stock && Directory.Exists(stock) ? stock : null);
 
     /// <summary>Open these files as the HUD, in this load order, with the transform files they need.</summary>
     internal void LoadFiles(IEnumerable<string> paths)
@@ -549,14 +547,14 @@ public partial class MainWindow : Window
     internal static IReadOnlyList<string> AutomaticAssetFoldersFor(IEnumerable<string> hudPaths)
     {
         var folders = hudPaths.Select(AssetResolver.ModDataFolderOf).OfType<string>().ToList();
-        if (Path.GetDirectoryName(StockDataCommon) is { } stock && Directory.Exists(stock)) folders.Add(stock);
+        if (ModTools.Folder is { } tools && Directory.Exists(Path.Combine(tools, "data"))) folders.Add(Path.Combine(tools, "data"));
         return folders.Distinct(HudFileSet.PathComparer).ToList();
     }
 
     /// <summary>The resolver for a HUD's files: their folders, the stock ones, then these asset folders.</summary>
     internal static AssetResolver ResolverFor(IEnumerable<string> hudPaths, IEnumerable<AssetFolderIndex> folders)
     {
-        var resolver = AssetResolver.ForHudFiles(hudPaths, Directory.Exists(StockDataCommon) ? StockDataCommon : null);
+        var resolver = AssetResolver.ForHudFiles(hudPaths, ModTools.DataCommon is { } common && Directory.Exists(common) ? common : null);
         foreach (var folder in folders) resolver.AddFolder(folder);
         return resolver;
     }
@@ -605,6 +603,31 @@ public partial class MainWindow : Window
         }
         if (_settings.Save() is { } error) StatusText.Text = $"Could not save the settings: {error}";
         foreach (var folder in added) ScanAssetFolder(folder);
+    }
+
+    private void ModTools_Click(object sender, RoutedEventArgs e) => AskModTools(firstStart: false);
+
+    /// <summary>Whether the mod tools have never been asked for: the editor's first start.</summary>
+    internal bool FirstStart => _settings.ModToolsFolder is null;
+
+    /// <summary>
+    /// Ask where the mod tools are, on the first start and from File > Mod tools folder, and read the stock assets
+    /// from there. Going without on the first start is kept; cancelling a change keeps what was.
+    /// </summary>
+    internal void AskModTools(bool firstStart)
+    {
+        var dialog = new ModToolsDialog(ModTools.Folder ?? ModTools.Detect(), firstStart) { Owner = this };
+        var chosen = dialog.ShowDialog() == true ? dialog.Folder : null;
+        if (chosen is null && !firstStart) return;
+        _settings.ModToolsFolder = chosen ?? string.Empty;
+        var error = _settings.Save();
+        ModTools.Folder = chosen;
+        ShowAssetFolders();
+        if (_files.Count > 0) LoadAssets();
+        StatusText.Text = error is not null ? $"Could not save the settings: {error}"
+            : chosen is null ? "Without the mod tools: a HUD shows what its own and its asset folders hold. File > Mod tools folder sets them."
+            : $"The stock HUD files and assets are read from {chosen}." +
+              (_files.Count > 0 ? " The stock transforms come in when the HUD is opened again." : string.Empty);
     }
 
     private void RemoveAssetFolder(string folder)

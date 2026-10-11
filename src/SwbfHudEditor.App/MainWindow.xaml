@@ -148,6 +148,8 @@
                           ToolTip="Save the HUD as a PNG the size of the Screen, as the canvas draws it (over the reference image when it shows), without the selection, the guides and the outlines." />
                 <MenuItem Header="Add asset _folder..." Click="AddAssetFolder_Click"
                           ToolTip="Search a folder and all its subfolders for the textures, meshes, fonts and localization the HUD's own folders and the stock ones do not have. Remembered for next time." />
+                <MenuItem Header="_Mod tools folder..." Click="ModTools_Click"
+                          ToolTip="The BF2_ModTools folder: the stock HUD files, textures, models, fonts and strings are read from its data folder." />
                 <Separator />
                 <MenuItem Header="_Reload files" Click="Reload_Click" InputGestureText="F5"
                           ToolTip="Restart the editor and re-read the files from disk. Useful after editing externally." />

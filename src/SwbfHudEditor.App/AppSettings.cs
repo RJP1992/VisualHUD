@@ -34,6 +34,12 @@ internal sealed class AppSettings
     public bool ReferenceOnTop { get; set; }
     public bool ReferenceShown { get; set; } = true;
 
+    /// <summary>
+    /// The BF2_ModTools folder the stock HUD files and assets are read from: null until asked on the first start,
+    /// empty when the user chose to go without.
+    /// </summary>
+    public string? ModToolsFolder { get; set; }
+
     /// <summary>Sets of sends saved under a name in the Events tab, to send again in one go.</summary>
     public List<SavedScenario> Scenarios { get; set; } = new();
 

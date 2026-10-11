@@ -158,9 +158,14 @@ public class HudRatioMigrationTests
 
     private static void AssertSameDrawing(List<(string Label, Vector2[] Points, bool Size)> before, List<(string Label, Vector2[] Points, bool Size)> after)
     {
-        Assert.Equal(before.Select(b => b.Label), after.Select(a => a.Label));
         Assert.Contains(before, b => b.Label.Contains(" segment "));
         Assert.Contains(before, b => b.Label.Contains(" copy of ObjectiveOnScreen"));
+        AssertSamePoints(before, after);
+    }
+
+    private static void AssertSamePoints(List<(string Label, Vector2[] Points, bool Size)> before, List<(string Label, Vector2[] Points, bool Size)> after)
+    {
+        Assert.Equal(before.Select(b => b.Label), after.Select(a => a.Label));
         for (var n = 0; n < before.Count; n++)
         {
             var (label, points, size) = before[n];
@@ -214,16 +219,54 @@ public class HudRatioMigrationTests
         // FileInfo says the shape, and nothing else about the layout.
         var info = file.TopLevel.First(b => b.Name == "FileInfo");
         Assert.Equal($"AuthoredRatio({w}, {h})", HudWriter.Header(Assert.Single(info.Children, c => c.Name is "AuthoredRatio" or "TrueWidescreen")));
-        // Viewport, but Frame stays Frame, a seating chart's own Position stays pixels and a MeshInfo keeps its unit.
+        // Viewport, but Frame stays Frame and a seating chart's own Position stays pixels; a MeshInfo only its model reads goes to Viewport.
         Assert.Equal("Viewport", Line(file, "pix", "Position").Arguments[3].Raw);
         Assert.Equal("Viewport", Line(file, "pix", "BitmapRect").Arguments[4].Raw);
         Assert.Equal("Frame", Line(file, "child", "Position").Arguments[3].Raw);
         Assert.Equal(3, Line(file, "seats", "Position").Arguments.Count);
-        Assert.Equal(3, Blocks(file.TopLevel).First(b => b.Name == "MeshInfo").Children.Single().Arguments.Count);
+        Assert.Equal("Viewport", Blocks(file.TopLevel).First(b => b.Name == "MeshInfo").Children.Single().Arguments[3].Raw);
 
         // One undo step puts it all back.
         new CompositeEdit(result.Edits, "rewrite").Revert();
         Assert.Equal(original, HudWriter.Write(file));
+    }
+
+    [Fact]
+    public void A_MeshInfo_Table_Two_Models_Read_Keeps_Its_Pixels()
+    {
+        // Each model converts a shared table again: only pixels come through both.
+        var file = HudParser.Parse("""
+            FileInfo("test")
+            {
+                Viewports(1)
+            }
+
+            Model3D("shared")
+            {
+                Viewport(1)
+                Mesh("hud_mesh")
+                Position(1000, 300, 0)
+                MeshInfo("hud_mesh")
+                {
+                    Position(40, 50, 0)
+                }
+            }
+
+            Model3D("reader")
+            {
+                Viewport(1)
+                Mesh("hud_mesh")
+                Position(600, 300, 0)
+                InheritMeshInfo("shared")
+            }
+
+            """);
+        var reference = HudRatioMigration.ReferenceFor(16, 9, 1080);
+        var before = Drawn(file, reference);
+        HudRatioMigration.Migrate(new[] { file }, file, 16, 9, 1080, Options);
+        AssertSamePoints(before, Drawn(file, reference));
+        // Moved to keep its place, and still in pixels: no unit written.
+        Assert.Equal(3, Blocks(file.TopLevel).First(b => b.Name == "MeshInfo").Children.Single().Arguments.Count);
     }
 
     [Fact]

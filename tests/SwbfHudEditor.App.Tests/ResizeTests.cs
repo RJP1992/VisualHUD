@@ -83,10 +83,15 @@ public class ResizeTests
             Assert.Equal(before.Right + 40, after.Right, 0.6);
             Assert.Equal(before.Top, after.Top, 0.6);
             Assert.Equal(before.Bottom, after.Bottom, 0.6);
-            Assert.Equal("100", Named(w, "centred").Children.Single(c => c.Name == "BitmapRect").Arguments[0].Raw);
+            // Written in Viewport, a share of the view's 1280 pixels; its Position, moved with its middle, too.
+            var size = Named(w, "centred").Children.Single(c => c.Name == "BitmapRect");
+            Assert.Equal("BitmapRect(0.078125, 0.055556, \"Center\", \"Center\", \"Viewport\")", HudWriter.Header(size));
+            Assert.Equal("Viewport", Named(w, "centred").Children.Single(c => c.Name == "Position").Arguments[3].Raw);
 
             ApplicationCommands.Undo.Execute(null, w);
             Assert.Equal(before, Drawn(w, "centred"));
+            Assert.Equal("BitmapRect(60, 40, \"Center\", \"Center\", \"Pixels\")", HudWriter.Header(size));
+            Assert.Equal("Position(300, 300, 0)", HudWriter.Header(Named(w, "centred").Children.Single(c => c.Name == "Position")));
         });
     }
 

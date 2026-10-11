@@ -80,6 +80,9 @@ public class HudKeepPlaceTests
         // The icon takes the group's scale as its own; the label, at its old parent's origin, gets a Position.
         Assert.Equal("Scale(2, 2, 1)", HudWriter.Header(Named(doc, "icon").Children.Single(c => c.Name == "Scale")));
         Assert.Single(Named(doc, "label").Children, c => c.Name == "Position");
+        // In a unit that scales: the icon's pixels, and the label's new line, in Viewport.
+        Assert.Equal("Viewport", Named(doc, "icon").Children.Single(c => c.Name == "Position").Arguments[3].Raw);
+        Assert.Equal("Viewport", Named(doc, "label").Children.Single(c => c.Name == "Position").Arguments[3].Raw);
 
         // Undone, the lines are as they were.
         new CompositeEdit(edits, "x").Revert();

@@ -8,9 +8,10 @@ namespace SwbfHudEditor.Core.Edits;
 /// <summary>
 /// Where elements are drawn, taken before what holds them changes (a new group round them, another group, a
 /// parent's frame moved) and given back after it: each position line written again against the parent as it
-/// then draws, in its own unit, so the element stays where it was on the screen. An element at its parent's
-/// origin gets a Position if it would move; a parent that scales otherwise along the screen's axes is made up
-/// for by the element's own Scale. Elements inside the ones kept move with them.
+/// then draws, in its own unit (Pixels made Viewport, <see cref="HudPlacement.WriteMode"/>), so the element
+/// stays where it was on the screen. An element at its parent's origin gets a Position, in Viewport, if it
+/// would move; a parent that scales otherwise along the screen's axes is made up for by the element's own
+/// Scale. Elements inside the ones kept move with them.
 /// </summary>
 public sealed class HudKeepPlace
 {
@@ -51,12 +52,12 @@ public sealed class HudKeepPlace
                 if (Place(line, role, e, point, parent, viewport: false) is { } args)
                     Apply(new ReplaceArgumentsEdit(line, args, block));
 
-            if (kept.Origin is { } origin && Last(block, "Position") is null)
+            if (kept.Origin is { } origin && Last(block, "Position") is null &&
+                Vector2.Distance(origin, OnScreen(Vector3.Zero, parent)) > 1e-3f)
             {
                 var made = new HudBlock("Position", HudArgument.FromInt(0), HudArgument.FromInt(0), HudArgument.FromInt(0));
                 var role = e.Kind == ElementKind.VehicleSeating ? LineRole.Seating : LineRole.Own;
-                if (Place(made, role, e, origin, parent, viewport: false) is { } args &&
-                    (MathF.Abs(EngineArgs.Float(args[0])) > 1e-4f || MathF.Abs(EngineArgs.Float(args[1])) > 1e-4f))
+                if (Place(made, role, e, origin, parent, viewport: false) is { } args)
                 {
                     made.Arguments.Clear();
                     made.Arguments.AddRange(args);

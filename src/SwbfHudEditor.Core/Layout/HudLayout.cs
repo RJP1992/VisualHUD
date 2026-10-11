@@ -344,6 +344,7 @@ public static partial class HudLayout
             if (users.Count < 2) continue;
             foreach (var e in users)
             {
+                e.SharesMeshInfo = true;
                 if (e.MeshInfo is not { } info || !table.Contains(info)) continue;
                 e.Local = MeshInfoMatrix(info, users);
                 e.World = options.RoundsToUnits ? EngineMath.RoundTranslation(e.Local * e.ParentWorld) : e.Local * e.ParentWorld;

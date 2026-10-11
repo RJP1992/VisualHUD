@@ -242,8 +242,8 @@ public partial class HudCanvas
         {
             SizeKind.BitmapRect => (Relative(EngineArgs.BitmapRectMode(r.SizeLine), w, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
                                     Relative(EngineArgs.BitmapRectMode(r.SizeLine), h, e.FrameHeight, e.ViewHeight, e.ScreenHeight)),
-            SizeKind.Rect => (Relative(e.Spec.RectMode, w, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
-                              Relative(e.Spec.RectMode, h, e.FrameHeight, e.ViewHeight, e.ScreenHeight)),
+            SizeKind.Rect => (Relative(UnitConversion.ModeOf(r.SizeLine), w, e.FrameWidth, e.ViewWidth, e.ScreenWidth),
+                              Relative(UnitConversion.ModeOf(r.SizeLine), h, e.FrameHeight, e.ViewHeight, e.ScreenHeight)),
             _ => ((w + 0.0001) / e.ViewWidth, (h + 0.0001) / e.ViewHeight),
         };
         r.SizeLine.Arguments[0] = HudPlacement.Number(sw, r.SizeLine.Arguments[0]);
@@ -293,7 +293,15 @@ public partial class HudCanvas
         _resize = null;
         DrawGuides(null, null);
         var changes = r.Originals.Select(o => o with { New = o.Line.Arguments[o.Index] }).Where(c => c.New != c.Old).ToList();
-        if (changes.Count > 0) BlockDragCommitted?.Invoke(this, new ArgumentsEdit(changes, $"resize {r.Block.Name}", r.Block));
+        if (changes.Count == 0) return;
+        var resize = new ArgumentsEdit(changes, $"resize {r.Block.Name}", r.Block);
+        // What it wrote in pixels is written in Viewport now.
+        static LineRole Own(LaidOutElement x) => x.Kind == ElementKind.VehicleSeating ? LineRole.Seating : LineRole.Own;
+        var written = new List<(HudBlock, LineRole, LaidOutElement)> { (r.SizeLine, LineRole.Own, r.Element) };
+        if (r.Position is { } position) written.Add((position, Own(r.Element), r.Element));
+        written.AddRange(r.Children.Select(c => (c.Line, Own(c.Child), c.Child)));
+        var units = ScaleUnits(Changed(written, changes));
+        BlockDragCommitted?.Invoke(this, units.Count == 0 ? resize : new CompositeEdit(units.Prepend(resize), resize.Description));
     }
 
     /// <summary>The lines a drag or a resize snaps to: every other element drawn, and the screen's edges and centre.</summary>

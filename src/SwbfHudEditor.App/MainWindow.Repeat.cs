@@ -72,18 +72,30 @@ public partial class MainWindow
         return copies.Count;
     }
 
-    /// <summary>A copy moved by screen pixels through the matrix its original's parent draws it with, in its Position's unit.</summary>
+    /// <summary>
+    /// A copy moved by screen pixels through the matrix its original's parent draws it with, in its Position's
+    /// unit; one in pixels, or none, in Viewport (<see cref="WriteMode"/>).
+    /// </summary>
     private static void Step(HudBlock copy, LaidOutElement original, double dx, double dy)
     {
-        var delta = original.PositionDeltaFor((float)dx, (float)dy);
+        var role = original.Kind == ElementKind.VehicleSeating ? LineRole.Seating : LineRole.Own;
+        var line = Last(copy, "Position");
+        if (line is not null && Scaled(line, role, original) is { } scaled)
+        {
+            line.Arguments.Clear();
+            line.Arguments.AddRange(scaled);
+        }
+        var mode = line is null ? WriteMode(RelativeMode.Pixels, role, original) : ReadMode(line, role);
+        var delta = original.PositionDeltaFor((float)dx, (float)dy, mode);
         if (MathF.Abs(delta.X) < 1e-7f && MathF.Abs(delta.Y) < 1e-7f) return;
-        if (Last(copy, "Position") is { } line)
+        if (line is not null)
         {
             line.Arguments[0] = Number(EngineArgs.Float(line.Arguments[0]) + delta.X, line.Arguments[0]);
             line.Arguments[1] = Number(EngineArgs.Float(line.Arguments[1]) + delta.Y, line.Arguments[1]);
+            return;
         }
-        else
-            copy.Children.Insert(copy.Children.TakeWhile(c => !c.HasBody).Count(),
-                new HudBlock("Position", Number(delta.X, null), Number(delta.Y, null), HudArgument.FromInt(0)));
+        var made = new List<HudArgument> { Number(delta.X, null), Number(delta.Y, null), HudArgument.FromInt(0) };
+        if (mode != RelativeMode.Pixels) made.Add(HudArgument.FromString(EngineArgs.RelativeModeNames[(int)mode]));
+        copy.Children.Insert(copy.Children.TakeWhile(c => !c.HasBody).Count(), new HudBlock("Position", made.ToArray()));
     }
 }

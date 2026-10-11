@@ -14,6 +14,9 @@ public sealed class CompositeEdit : IHudEdit
         _description = description;
     }
 
+    /// <summary>The edits, in the order they apply.</summary>
+    public IReadOnlyList<IHudEdit> Edits => _edits;
+
     public HudBlock? AffectedBlock => _edits.Count > 0 ? _edits[0].AffectedBlock : null;
     public string Description => _description;
 

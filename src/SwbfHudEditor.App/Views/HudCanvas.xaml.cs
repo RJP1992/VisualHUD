@@ -1357,7 +1357,7 @@ public partial class HudCanvas : UserControl
             if (elements.Any(o => !ReferenceEquals(o, e) && IsInside(e, o))) continue;
             var line = e.PositionOwner.Children.LastOrDefault(c => !c.HasBody && c.Name == "Position" && c.Arguments.Count >= 2);
             if (line is null || !EngineArgs.IsNumber(line.Arguments[0]) || !EngineArgs.IsNumber(line.Arguments[1])) continue;
-            var delta = e.PositionDeltaFor((float)dx, (float)dy);
+            var delta = e.PositionDeltaFor((float)dx, (float)dy, HudPlacement.ReadMode(line, HudPlacement.RoleOf(e)));
             for (var i = 0; i < 2; i++)
             {
                 var old = line.Arguments[i];
@@ -1371,6 +1371,51 @@ public partial class HudCanvas : UserControl
             }
         }
         return changes;
+    }
+
+    /// <summary>The position lines a move of these elements writes, with what they are: as <see cref="MoveChanges"/> finds them.</summary>
+    internal List<(HudBlock Line, LineRole Role, LaidOutElement Element)> MovedLines(IEnumerable<HudBlock> blocks)
+    {
+        var lines = new List<(HudBlock, LineRole, LaidOutElement)>();
+        if (_layout is null) return lines;
+        var elements = blocks.Select(b => _layout.Find(b)).OfType<LaidOutElement>().ToList();
+        foreach (var e in elements)
+        {
+            if (elements.Any(o => !ReferenceEquals(o, e) && IsInside(e, o))) continue;
+            var line = e.PositionOwner.Children.LastOrDefault(c => !c.HasBody && c.Name == "Position" && c.Arguments.Count >= 2);
+            if (line is not null && EngineArgs.IsNumber(line.Arguments[0]) && EngineArgs.IsNumber(line.Arguments[1]))
+                lines.Add((line, HudPlacement.RoleOf(e), e));
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// Lines in pixels, which stay the same number at every resolution, rewritten in Viewport, nothing moving at
+    /// this screen (<see cref="HudPlacement.WriteMode"/>), and the canvas laid out again. The edits, made already,
+    /// go in the undo step of the change that writes the lines: after it, or before it for a nudge, which the
+    /// next nudges join.
+    /// </summary>
+    internal List<IHudEdit> ScaleUnits(IEnumerable<(HudBlock Line, LineRole Role, LaidOutElement Element)> lines)
+    {
+        var edits = new List<IHudEdit>();
+        var seen = new HashSet<HudBlock>(ReferenceEqualityComparer.Instance);
+        foreach (var (line, role, e) in lines)
+            if (seen.Add(line) && HudPlacement.Scaled(line, role, e) is { } args)
+            {
+                var edit = new ReplaceArgumentsEdit(line, args, e.Block);
+                edit.Apply();
+                edits.Add(edit);
+            }
+        if (edits.Count > 0) Refresh();
+        return edits;
+    }
+
+    /// <summary>Those of the lines that the changes changed.</summary>
+    internal static IEnumerable<(HudBlock Line, LineRole Role, LaidOutElement Element)> Changed(
+        IEnumerable<(HudBlock Line, LineRole Role, LaidOutElement Element)> lines, IEnumerable<ArgumentChange> changes)
+    {
+        var changed = new HashSet<HudBlock>(changes.Select(c => c.Line), ReferenceEqualityComparer.Instance);
+        return lines.Where(l => changed.Contains(l.Line));
     }
 
     private static bool IsInside(LaidOutElement e, LaidOutElement container)
@@ -1613,7 +1658,18 @@ public partial class HudCanvas : UserControl
         var changes = originals.Select(o => o with { New = o.Line.Arguments[o.Index] }).Where(c => c.New != c.Old).ToList();
         if (block is null || changes.Count == 0) return;
         var moved = changes.Select(c => c.Line).Distinct().Count();
-        BlockDragCommitted?.Invoke(this, new ArgumentsEdit(changes, moved == 1 ? $"move {block.Name}" : $"move {moved} elements", block));
+        var move = new ArgumentsEdit(changes, moved == 1 ? $"move {block.Name}" : $"move {moved} elements", block);
+        // A Position moved in pixels is written in Viewport now.
+        var units = ScaleUnits(Changed(MovedLines(_dragBlocks), changes));
+        BlockDragCommitted?.Invoke(this, units.Count == 0 ? move : new CompositeEdit(units.Prepend(move), move.Description));
+    }
+
+    /// <summary>Units rewritten for a change that then changed nothing, put back.</summary>
+    internal void Unscale(List<IHudEdit> units)
+    {
+        if (units.Count == 0) return;
+        for (var i = units.Count - 1; i >= 0; i--) units[i].Revert();
+        Refresh();
     }
 
     private void Canvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)

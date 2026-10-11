@@ -234,6 +234,12 @@ public sealed class LaidOutElement
     public MeshInfoSpec? MeshInfo { get; set; }
 
     /// <summary>
+    /// A model reading a <c>MeshInfo</c> table another model reads too (<c>InheritMeshInfo</c>): each converts
+    /// the table's positions again, so only <c>"Pixels"</c> ones come through.
+    /// </summary>
+    public bool SharesMeshInfo { get; set; }
+
+    /// <summary>
     /// A model's depth as drawn (<c>m_fDepth</c>): how far <c>LocalToWorld</c> pulls it toward the camera,
     /// which sets its size. See <see cref="ModelProjection"/>.
     /// </summary>
@@ -304,7 +310,11 @@ public sealed class LaidOutElement
     /// What a drag of (dx, dy) screen pixels does to its <c>Position</c> numbers, in their own mode: the
     /// inverse of the parent's draw, then of the mode's conversion.
     /// </summary>
-    public Vector2 PositionDeltaFor(float dxScreen, float dyScreen)
+    public Vector2 PositionDeltaFor(float dxScreen, float dyScreen) =>
+        PositionDeltaFor(dxScreen, dyScreen, MeshInfo?.PositionMode ?? Spec.PositionMode);
+
+    /// <summary>The same, for numbers in <paramref name="mode"/>: a line's unit as it is now, which the layout may not have read yet.</summary>
+    public Vector2 PositionDeltaFor(float dxScreen, float dyScreen, RelativeMode mode)
     {
         // Screen pixels to interface units, then into the parent's pixels.
         var k = EngineMath.InterfaceWidth / ScreenPixelsWide;
@@ -314,7 +324,6 @@ public sealed class LaidOutElement
         if (MathF.Abs(det) < 1e-12f) return Vector2.Zero;
         var dx = (du.X * p.M22 - du.Y * p.M21) / det;
         var dy = (du.Y * p.M11 - du.X * p.M12) / det;
-        var mode = MeshInfo?.PositionMode ?? Spec.PositionMode;
         return new Vector2(
             EngineMath.ToRelative(mode, dx, FrameWidth, ViewWidth, ScreenWidth),
             EngineMath.ToRelative(mode, dy, FrameHeight, ViewHeight, ScreenHeight));

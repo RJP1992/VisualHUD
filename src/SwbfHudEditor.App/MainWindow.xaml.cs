@@ -1914,15 +1914,25 @@ public partial class MainWindow : Window
     internal void Nudge(double dx, double dy)
     {
         var blocks = SelectedItems.OfType<HudBlock>().ToList();
+        // A Position in pixels is written in Viewport first, in the same undo step.
+        var units = Canvas.ScaleUnits(Canvas.MovedLines(blocks));
         var changes = Canvas.MoveChanges(blocks, dx, dy);
         if (changes.Count == 0)
         {
+            Canvas.Unscale(units);
             StatusText.Text = blocks.Count == 0 ? "Select an element to move it with the arrow keys."
                 : "Nothing to move: the selection has no Position line (add one from the Add tab).";
             return;
         }
         var now = DateTime.UtcNow;
-        if (_undo.Top is ArgumentsEdit last && last.Description == "nudge" && (now - _nudgeAt).TotalSeconds < 1.5 && last.Covers(changes))
+        // The last nudge's numbers, alone or after the units it wrote first.
+        var lastNudge = _undo.Top switch
+        {
+            ArgumentsEdit { Description: "nudge" } a => a,
+            CompositeEdit { Description: "nudge", Edits: [.., ArgumentsEdit a] } => a,
+            _ => null,
+        };
+        if (units.Count == 0 && lastNudge is { } last && (now - _nudgeAt).TotalSeconds < 1.5 && last.Covers(changes))
         {
             last.Extend(changes);
             last.Apply();
@@ -1932,7 +1942,7 @@ public partial class MainWindow : Window
         {
             var edit = new ArgumentsEdit(changes, "nudge", blocks.FirstOrDefault());
             edit.Apply();
-            _undo.Push(edit);
+            _undo.Push(units.Count == 0 ? edit : new CompositeEdit(units.Append(edit), "nudge"));
         }
         _nudgeAt = now;
         Canvas.Refresh();
@@ -2020,6 +2030,12 @@ public partial class MainWindow : Window
                 if (block.Name == "VehicleSeating" && line.Name == "Position")
                 {
                     skipped.Add($"{block.Name} \"{block.ItemName}\" Position (read as pixels whatever its mode)");
+                    continue;
+                }
+                if (to != RelativeMode.Pixels && block.Name == "MeshInfo" && line.Name == "Position" &&
+                    ParentOf(block) is { } model && Canvas.LaidOut(model) is { SharesMeshInfo: true })
+                {
+                    skipped.Add($"MeshInfo \"{block.ItemName}\" Position (another model reads this table and converts it again: only pixels come through)");
                     continue;
                 }
                 if (!UnitConversion.CanConvert(line, to) || BasisFor(block) is not { } basis) continue;

@@ -123,9 +123,9 @@ public partial class MainWindow
         var h = (float)box.Height;
         var lines = group.Children.TakeWhile(c => !c.HasBody).Count();
 
-        // The Rect: the box's size, in the Rect's own unit (Viewport for a new one), its alignment kept.
+        // The Rect: the box's size, in the Rect's own unit (Viewport for a new one or one in pixels), its alignment kept.
         var rect = Last(group, "Rect");
-        var mode = rect is null ? RelativeMode.Viewport : spec.RectMode;
+        var mode = rect is null || spec.RectMode == RelativeMode.Pixels ? RelativeMode.Viewport : spec.RectMode;
         var rectArgs = new List<HudArgument>
         {
             Number(EngineMath.ToRelative(mode, w, g.FrameWidth, g.ViewWidth, g.ScreenWidth), rect?.Arguments[0]),
@@ -142,14 +142,7 @@ public partial class MainWindow
         var corner = Vector2.Transform(new Vector2((float)box.Left, (float)box.Top), g.Local);
         var point = corner + new Vector2(AlignShares[(int)spec.RectHAlign] * w, AlignShares[(int)spec.RectVAlign] * h);
         var position = Last(group, "Position");
-        var pmode = spec.PositionMode;
-        var positionArgs = new List<HudArgument>
-        {
-            Number(EngineMath.ToRelative(pmode, point.X, g.FrameWidth, g.ViewWidth, g.ScreenWidth), position?.Arguments[0]),
-            Number(EngineMath.ToRelative(pmode, point.Y, g.FrameHeight, g.ViewHeight, g.ScreenHeight), position?.Arguments[1]),
-            (position is null ? null : EngineArgs.At(position, 2)) ?? HudArgument.FromInt(0),
-        };
-        if (position is not null) positionArgs.AddRange(position.Arguments.Skip(3));
+        var positionArgs = Write(position ?? NewPosition(), LineRole.Own, g, point.X, point.Y);
         if (position is null) Apply(new InsertBlockEdit(group.Children, lines++, new HudBlock("Position", positionArgs.ToArray()), "add Position", affected: group));
         else if (!positionArgs.SequenceEqual(position.Arguments)) Apply(new ReplaceArgumentsEdit(position, positionArgs, group));
 
@@ -165,6 +158,9 @@ public partial class MainWindow
         if (edits.Count > 0) edits.AddRange(keep.Restore(HudLayout.Lay(Documents, options), notes));
         return edits;
     }
+
+    /// <summary>A Position for an element without one: at its parent's origin, until it is written where it goes.</summary>
+    private static HudBlock NewPosition() => new("Position", HudArgument.FromInt(0), HudArgument.FromInt(0), HudArgument.FromInt(0));
 
     // ---- A Text's box fitted to its text --------------------------------------------------------------------
 
@@ -207,12 +203,8 @@ public partial class MainWindow
         if (moved.LengthSquared() > 1e-8f)
         {
             var position = Last(block, "Position");
-            var mode = e.Spec.PositionMode;
-            var x = (position is null ? 0 : EngineArgs.Float(position.Arguments[0])) + EngineMath.ToRelative(mode, moved.X, e.FrameWidth, e.ViewWidth, e.ScreenWidth);
-            var y = (position is null ? 0 : EngineArgs.Float(position.Arguments[1])) + EngineMath.ToRelative(mode, moved.Y, e.FrameHeight, e.ViewHeight, e.ScreenHeight);
-            var args = new List<HudArgument> { Number(x, position?.Arguments[0]), Number(y, position?.Arguments[1]),
-                (position is null ? null : EngineArgs.At(position, 2)) ?? HudArgument.FromInt(0) };
-            if (position is not null) args.AddRange(position.Arguments.Skip(3));
+            var at = position is null ? Vector3.Zero : PixelsOf(position, LineRole.Own, e);
+            var args = Write(position ?? NewPosition(), LineRole.Own, e, at.X + moved.X, at.Y + moved.Y);
             if (position is null) Apply(new InsertBlockEdit(block.Children, lines, new HudBlock("Position", args.ToArray()), "add Position", affected: block));
             else if (!args.SequenceEqual(position.Arguments)) Apply(new ReplaceArgumentsEdit(position, args, block));
         }

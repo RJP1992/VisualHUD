@@ -87,9 +87,8 @@ public static class HudPlacement
 
     /// <summary>
     /// The arguments that put a position line's element at <paramref name="point"/> on the screen through its
-    /// parent's matrix as it now draws, z kept, or null when nothing moves. In Viewport when
-    /// <paramref name="viewport"/> asks (Frame, a seating chart's pixels and a MeshInfo's own unit kept), else in
-    /// the line's own unit; a unit left out stays left out where it is the one kept.
+    /// parent's matrix as it now draws, z kept, or null when nothing moves; in the unit <see cref="WriteMode"/>
+    /// gives it.
     /// </summary>
     public static List<HudArgument>? Place(HudBlock line, LineRole role, LaidOutElement e, Vector2 point, Matrix4x4 parent, bool viewport)
     {
@@ -100,11 +99,19 @@ public static class HudPlacement
         if (MathF.Abs(det) < 1e-12f) return null;
         var x = (bx * parent.M22 - by * parent.M21) / det;
         var y = (by * parent.M11 - bx * parent.M12) / det;
+        var args = Write(line, role, e, x, y, viewport);
+        return args.SequenceEqual(line.Arguments) ? null : args;
+    }
 
+    /// <summary>
+    /// The arguments that put a position line's element at (<paramref name="x"/>, <paramref name="y"/>) of its
+    /// parent's pixels, z and what follows the unit kept, in the unit <see cref="WriteMode"/> gives it; a unit
+    /// left out stays left out where it is the one kept.
+    /// </summary>
+    public static List<HudArgument> Write(HudBlock line, LineRole role, LaidOutElement e, float x, float y, bool viewport = false)
+    {
         var current = EngineArgs.PositionMode(EngineArgs.At(line, 3));
-        var mode = role == LineRole.Seating ? RelativeMode.Pixels
-            : !viewport || role == LineRole.MeshInfo || current == RelativeMode.Frame ? current
-            : RelativeMode.Viewport;
+        var mode = WriteMode(current, role, e, viewport);
         var args = new List<HudArgument>
         {
             Number(EngineMath.ToRelative(mode, x, e.FrameWidth, e.ViewWidth, e.ScreenWidth), EngineArgs.At(line, 0)),
@@ -113,7 +120,50 @@ public static class HudPlacement
         };
         if (line.Arguments.Count > 3 || mode != current) args.Add(HudArgument.FromString(EngineArgs.RelativeModeNames[(int)mode]));
         args.AddRange(line.Arguments.Skip(4));
-        return args.SequenceEqual(line.Arguments) ? null : args;
+        return args;
+    }
+
+    /// <summary>
+    /// The unit the editor writes a position line in. Never Pixels, which stay the same number at every
+    /// resolution while the rest of a HUD grows and shrinks with the screen: a line in Pixels is written in
+    /// Viewport, and every line when <paramref name="viewport"/> asks, Frame kept. Pixels stay only where the
+    /// game reads them whatever is written: a seating chart's own Position, and the MeshInfo positions of a
+    /// table two models read, which each converts again.
+    /// </summary>
+    public static RelativeMode WriteMode(RelativeMode current, LineRole role, LaidOutElement e, bool viewport = false) => role switch
+    {
+        LineRole.Seating => RelativeMode.Pixels,
+        LineRole.MeshInfo when e.SharesMeshInfo => current,
+        _ when current == RelativeMode.Frame => current,
+        _ when viewport || current == RelativeMode.Pixels => RelativeMode.Viewport,
+        _ => current,
+    };
+
+    /// <summary>The unit the game reads a position line in: a seating chart's own in pixels, whatever is written.</summary>
+    public static RelativeMode ReadMode(HudBlock line, LineRole role) =>
+        role == LineRole.Seating ? RelativeMode.Pixels : EngineArgs.PositionMode(EngineArgs.At(line, 3));
+
+    /// <summary>What the line that places an element as drawn is: its shown MeshInfo's, a seating chart's own, or its own.</summary>
+    public static LineRole RoleOf(LaidOutElement e) =>
+        e.MeshInfo is not null ? LineRole.MeshInfo : e.Kind == ElementKind.VehicleSeating ? LineRole.Seating : LineRole.Own;
+
+    /// <summary>The sizes an element's own lines are read against.</summary>
+    public static UnitBasis BasisOf(LaidOutElement e) =>
+        new(e.FrameWidth, e.FrameHeight, e.ViewWidth, e.ViewHeight, e.ScreenWidth, e.ScreenHeight);
+
+    /// <summary>
+    /// A Position, Rect or BitmapRect of an element rewritten in the unit the editor writes it in, nothing
+    /// moving at this screen: a Pixels one in Viewport (see <see cref="WriteMode"/>). Null when it is in that
+    /// unit already, or cannot take another.
+    /// </summary>
+    public static IReadOnlyList<HudArgument>? Scaled(HudBlock line, LineRole role, LaidOutElement e)
+    {
+        if (UnitConversion.Of(line.Name) is null) return null;
+        var current = UnitConversion.ModeOf(line);
+        var to = line.Name is "Rect" or "BitmapRect"
+            ? current == RelativeMode.Pixels ? RelativeMode.Viewport : current
+            : WriteMode(current, role, e);
+        return to == current ? null : UnitConversion.Convert(line, to, BasisOf(e));
     }
 
     /// <summary>A number written as the one it replaces was where it can be, a new one whole where it is whole.</summary>

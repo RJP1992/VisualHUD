@@ -121,6 +121,19 @@ public class ShapeTests
     }
 
     [Fact]
+    public void Square_Writes_A_Size_In_Pixels_In_Viewport_In_One_Undo_Step()
+    {
+        UiThread.WithWindow(Hud, Files, (w, _) =>
+        {
+            var rect = RectOf(w, "pixels");
+            Click(ShapeButton(w, "pixels", "Square"));
+            Assert.Equal("Viewport", rect.Arguments[4].Raw);
+            System.Windows.Input.ApplicationCommands.Undo.Execute(null, w);
+            Assert.Equal("BitmapRect(64, 64, \"Left\", \"Top\", \"Pixels\")", HudWriter.Header(rect));
+        });
+    }
+
+    [Fact]
     public void The_Textures_Shape_Is_Its_Size_Over_The_Part_TexCoords_Show()
     {
         UiThread.WithWindow(Hud, Files, (w, _) =>

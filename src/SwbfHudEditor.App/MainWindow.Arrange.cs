@@ -125,7 +125,11 @@ public partial class MainWindow
         var shown = Tree.SelectedItem as HudBlock;
         var edit = new ArgumentsEdit(changes, Describe(how), shown);
         edit.Apply();
-        _undo.Push(edit);
+        // A Position, BitmapRect or Rect it wrote in pixels is written in Viewport now, in the same undo step.
+        var units = Canvas.ScaleUnits(Views.HudCanvas.Changed(how <= Arrangement.Down
+            ? Canvas.MovedLines(SelectedItems.OfType<HudBlock>())
+            : SizedLines(), changes));
+        _undo.Push(units.Count == 0 ? edit : new CompositeEdit(units.Prepend(edit), Describe(how)));
         Canvas.Refresh();
         if (shown is not null && (!Properties.ShowsBlock(shown) || !Properties.RefreshValues())) Properties.SetBlock(shown);
         var lines = changes.Select(c => c.Line).Distinct().Count();
@@ -209,6 +213,16 @@ public partial class MainWindow
             at += Length(b) + gap;
         }
         return (changes, Stuck(stuck));
+    }
+
+    /// <summary>The lines a match of sizes writes: each selected element's but the one whose size they take.</summary>
+    private List<(HudBlock Line, LineRole Role, LaidOutElement Element)> SizedLines()
+    {
+        var lines = new List<(HudBlock, LineRole, LaidOutElement)>();
+        foreach (var block in SelectedItems.OfType<HudBlock>().Where(b => !ReferenceEquals(b, Tree.SelectedItem)))
+            if (Canvas.LaidOut(block) is { } e && SizeLine(block, e) is { } line)
+                lines.Add((line, LineRole.Own, e));
+        return lines;
     }
 
     /// <summary>The line that sizes an element: a bitmap's last BitmapRect, a group's last Rect.</summary>

@@ -557,12 +557,18 @@ public partial class PropertyPanel : UserControl
             button.Click += (_, _) =>
             {
                 if (_block is null) return;
+                // A size in pixels is written in Viewport: the same at this screen, and it scales with others.
+                var before = leaf.Arguments.ToList();
+                if (UnitConversion.ModeOf(leaf) == RelativeMode.Pixels && BasisOf?.Invoke(_block) is { } basis &&
+                    UnitConversion.Convert(leaf, RelativeMode.Viewport, basis) is { } scaled && scaled.Count == before.Count)
+                    for (var i = 0; i < scaled.Count; i++) leaf.Arguments[i] = scaled[i];
                 if (aspect() is not { } a || HeightForAspect?.Invoke(_block, leaf, a) is not { } h)
                 {
+                    for (var i = 0; i < before.Count; i++) leaf.Arguments[i] = before[i];
                     ShapeRefused?.Invoke(this, refusal);
                     return;
                 }
-                SetHeight(leaf, h);
+                SetHeight(leaf, h, before);
             };
             return button;
         }
@@ -617,18 +623,25 @@ public partial class PropertyPanel : UserControl
     /// <summary>A shape asked for that the panel cannot work out, with why.</summary>
     public event EventHandler<string>? ShapeRefused;
 
-    /// <summary>The BitmapRect's height, in the kind the line had it where it can.</summary>
-    private void SetHeight(HudBlock leaf, double height)
+    /// <summary>
+    /// The BitmapRect's height, in the kind the line had it where it can; with the rest of what changed in the line
+    /// since <paramref name="before"/> (its unit), in one undo step.
+    /// </summary>
+    private void SetHeight(HudBlock leaf, double height, IReadOnlyList<HudArgument> before)
     {
         var current = leaf.Arguments[1];
         var whole = Math.Abs(height - Math.Round(height)) < 1e-6;
-        var changed = current.Kind == HudArgKind.Integer && whole
+        leaf.Arguments[1] = current.Kind == HudArgKind.Integer && whole
             ? HudArgument.FromInt((long)Math.Round(height))
             : HudArgument.FromFloat(height);
-        if (changed == current) return;
-        leaf.Arguments[1] = changed;
-        Edited(new PropertyEditedEventArgs(leaf, new[] { new ArgChange(1, current, changed) }, _block));
-        RefreshValues();
+        var changes = Enumerable.Range(0, before.Count)
+            .Where(i => leaf.Arguments[i] != before[i])
+            .Select(i => new ArgChange(i, before[i], leaf.Arguments[i]))
+            .ToList();
+        if (changes.Count == 0) return;
+        Edited(new PropertyEditedEventArgs(leaf, changes, _block));
+        if (changes.Count > 1) Rebuild();
+        else RefreshValues();
     }
 
     /// <summary>The unit names a line's mode takes: Frame only for a Position.</summary>

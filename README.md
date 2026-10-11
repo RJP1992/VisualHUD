@@ -259,7 +259,16 @@ one's for the same key.
   in, greyed, to change the same way. **Edit > Convert units** does it for the selection and
   everything in it, or a whole file, in one undo step: Viewport makes a HUD follow the
   resolution. Choose the resolution the HUD was made for in **Screen** first. A VehicleSeating's
-  own `Position` is left as it is, as the game reads it as pixels whatever its unit.
+  own `Position` is left as it is, as the game reads it as pixels whatever its unit, and so are
+  the `MeshInfo` positions of a table two models read with `InheritMeshInfo`.
+- **No pixels.** A number in pixels stays the same number of pixels at every resolution, while
+  what is sized in Viewport or Screen units grows and shrinks with the screen, so the two drift
+  apart. So nothing the editor works out is written in pixels: a line it writes for a drag, a
+  nudge, a resize, Arrange, Repeat, Fit Rect, Fit text box, grouping, ungrouping, a move to another
+  parent or **Lay out for a screen shape** goes in Viewport when it was in pixels (Screen and Frame
+  are kept), in the same undo step, the element staying where it is at the canvas's **Screen**;
+  a `Position` it adds is in Viewport. Only where the game reads pixels whatever is written does
+  it keep them (the two lines above). What you type, and a unit you choose, stay as you give them.
 - A `TextBox` has a button that fits the box to the text as it shows now (its lines as laid out,
   with a pixel to spare so it wraps as it does), its `Position` moved so the text stays where it
   is; **Edit > Fit text box to text** does the same for the selected Text, adding a `TextBox`

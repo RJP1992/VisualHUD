@@ -195,7 +195,7 @@ public static class PropertyCatalog
         Add("Segmented", "Bar", "Segment", "BarSegmented: the template every segment is copied from, a bitmap.",
             () => Block("Segment", "Segment",
                 Leaf("Bitmap", S("white")),
-                Leaf("BitmapRect", F(4), F(8), S("Center"), S("Center"), S("Pixels"))),
+                Leaf("BitmapRect", F(0.003122), F(0.014606), S("Center"), S("Center"), S("Viewport"))),
             isBlock: true);
 
         // ---- Model3D (ElementModel3D::Read, P 00605C70) ----

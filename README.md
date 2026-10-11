@@ -9,8 +9,9 @@ does, on the screen you pick, for the stock game or for the game with
 The layout follows the engine's own code rather than estimates: positions, Rects and
 alignment, the 640 × 480 mapping and the letterbox a wide screen gets, the bitmap stretch,
 bar fills, segmented rings, draw order and rounding. How each rule was read is in
-[docs/Engine.md](docs/Engine.md), along with what is not modelled yet. What it has of BF2GameExt, and
-how it keeps up with it, is in [docs/GameExtParity.md](docs/GameExtParity.md).
+[docs/Engine.md](docs/Engine.md), along with what is not modelled yet. Whenever BF2GameExt changes what
+a HUD can say, what the game sends it or how it is drawn, VisualHUD changes with it: the rule, and where
+parity stands, are in [docs/GameExtParity.md](docs/GameExtParity.md).
 
 ## Download
 

@@ -22,8 +22,12 @@ public sealed class HudTransformGraph
 
     private HudTransformGraph(IReadOnlyList<TransformNode> nodes) => Nodes = nodes;
 
-    /// <summary>Every transform in the documents, in order, names filtered as their ViewPort reads them.</summary>
-    public static HudTransformGraph From(IEnumerable<HudDocument> documents)
+    /// <summary>
+    /// Every transform in the documents, in order, names filtered as their ViewPort reads them. Under
+    /// <paramref name="gameExt"/>, the TransformNameMesh tables that feed one event know each other, for GameExt's
+    /// WeaponIconFix (see <see cref="NameMeshNode"/>).
+    /// </summary>
+    public static HudTransformGraph From(IEnumerable<HudDocument> documents, bool gameExt = false)
     {
         var nodes = new List<TransformNode>();
         foreach (var doc in documents)
@@ -34,6 +38,11 @@ public sealed class HudTransformGraph
             n.Resolve(byName);
             if (n.InstanceName is { } name) byName.TryAdd(name, n);
         }
+        if (gameExt)
+            foreach (var feed in nodes.OfType<NameMeshNode>().Where(n => n.Output is not null)
+                         .GroupBy(n => n.Output!, StringComparer.OrdinalIgnoreCase))
+                foreach (var n in feed)
+                    n.Rivals.AddRange(feed.Where(other => !ReferenceEquals(other, n)));
         return new HudTransformGraph(nodes);
     }
 
@@ -294,7 +303,10 @@ public sealed class ColorBlendNode : TransformNode
 
 /// <summary>
 /// TransformNameMesh: a Uint name hash to a model, by its <c>NameMesh(source, mesh)</c> rows and any
-/// it inherits; with no row, the model of that name if one is loaded.
+/// it inherits; with no row, the model of that name if one is loaded. Under GameExt's <c>WeaponIconFix</c>
+/// (<c>hud_weapon_icon_fix.cpp</c>, on by default), a table with no row for the name stays quiet when another
+/// table feeding the same event has one, so a mod's table no longer sends the weapon's own model over
+/// another's icon.
 /// </summary>
 public sealed class NameMeshNode : TransformNode
 {
@@ -302,6 +314,17 @@ public sealed class NameMeshNode : TransformNode
     public string? Output { get; private set; }
     public List<(string Source, string Mesh)> Rows { get; } = new();
     private readonly List<string> _inherits = new();
+
+    /// <summary>Under GameExt, the other tables that feed the same event; none for the stock game.</summary>
+    internal List<NameMeshNode> Rivals { get; } = new();
+
+    /// <summary>The model a row gives for a name hash, or null when no row has the name.</summary>
+    internal string? MeshFor(uint hash)
+    {
+        foreach (var (source, mesh) in Rows)
+            if (PblHash.Of(source) == hash) return mesh;
+        return null;
+    }
 
     public static NameMeshNode Read(HudBlock block, string? name, Func<string, string> filter)
     {
@@ -334,12 +357,13 @@ public sealed class NameMeshNode : TransformNode
     public override IEnumerable<(string Name, HudEventValue Value)> Run(Func<string, HudEventValue?> latest)
     {
         if (Output is null || Input is null || latest(Input) is not { Type: HudEventType.Uint } input || input.Uint == 0) yield break;
-        foreach (var (source, mesh) in Rows)
-            if (PblHash.Of(source) == input.Uint)
-            {
-                yield return (Output, HudEventValue.FromModel(mesh));
-                yield break;
-            }
+        if (MeshFor(input.Uint) is { } mesh)
+        {
+            yield return (Output, HudEventValue.FromModel(mesh));
+            yield break;
+        }
+        // GameExt: another table for this event has the name, and it wins.
+        if (Rivals.Any(r => r.MeshFor(input.Uint) is not null)) yield break;
         // No row: the model with that name hash, if the name is known.
         if (input.Text is { Length: > 0 } name) yield return (Output, HudEventValue.FromModel(name));
     }

@@ -65,9 +65,6 @@ VisualHUD side is recorded as a task before the GameExt side is called finished.
 
 ## Status
 
-VisualHUD 1.0.0 matches the HUD features of BF2GameExt up to 1.2.0 (unreleased as of 11 October 2026), except:
-
-- `[Fixes] WeaponIconFix`: under GameExt, a `TransformNameMesh` with no row for a weapon stays quiet when another
-  one has a row for it. VisualHUD still sends the model by name, as the stock game does.
-- `[Features] TargetBarLatchSeconds` and `[Fixes] ReticleCorrection` act while the game runs; there is nothing for
-  the editor to preview.
+VisualHUD 1.0.0 matches the HUD features of BF2GameExt up to 1.2.0 (unreleased as of 11 October 2026). Two INI
+settings act only while the game runs, so there is nothing for the editor to preview: `[Features]
+TargetBarLatchSeconds` and `[Fixes] ReticleCorrection`.

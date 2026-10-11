@@ -396,6 +396,11 @@ without it every element shows, as before any event.
   with Alpha mode and a weight of 127 by default, `TransformNameMesh::EventInput` P `0061C8E0`
   by name hash), and GameExt's Math, Lerp and Compare as its docs describe. Names inside a
   `ViewPort` with `EventNameFilter("player%")` are renamed to player 1.
+- **Several `TransformNameMesh` tables for one event**, as two mods' weapon icons are: each runs
+  in turn, and one without a row for the name sends the model of that name, so in the stock game
+  the last table decides, often with the weapon's own model. Under GameExt (its `WeaponIconFix`,
+  on by default) a table without the row stays quiet when another table for the event has it.
+  The canvas does the same under **Game: GameExt**.
 - **Handlers.** `EventValue` fills a bar (numbers only); `EventText` sets a String or looks a
   Uint up as a localization hash; `EventNumber` prints with `IntegerFormat` (`%d`),
   `FloatFormat` (`%f`), `Percent` (`%.0f%`), `NumberToTime` or `InfiniteDashes`

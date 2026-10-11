@@ -151,6 +151,28 @@ public class EventCoreTests
     }
 
     [Fact]
+    public void NameMesh_Under_GameExt_A_Table_With_The_Name_Beats_One_Without()
+    {
+        // Two mods' tables for one event: the first maps its weapon, the second does not know it.
+        const string tables = """
+            TransformNameMesh("modA") { NameMesh("moda_weap_blaster", "hud_moda_blaster") EventInput("player1.weapon1.change") EventOutput("player1.weapon1.mesh") }
+            TransformNameMesh("modB") { NameMesh("modb_weap_cannon", "hud_modb_cannon") EventInput("player1.weapon1.change") EventOutput("player1.weapon1.mesh") }
+            """;
+        var send = ("player1.weapon1.change", HudEventValue.FromName("moda_weap_blaster"));
+
+        // The stock game: the second table finds no row and sends the weapon's own model last.
+        var stock = HudTransformGraph.From(new[] { HudParser.Parse(tables) });
+        Assert.Equal("moda_weap_blaster", Run(stock, send)["player1.weapon1.mesh"].Text);
+
+        // GameExt: the table with the row wins; the other stays quiet.
+        var gameExt = HudTransformGraph.From(new[] { HudParser.Parse(tables) }, gameExt: true);
+        Assert.Equal("hud_moda_blaster", Run(gameExt, send)["player1.weapon1.mesh"].Text);
+        Assert.Equal("hud_modb_cannon", Run(gameExt, ("player1.weapon1.change", HudEventValue.FromName("modb_weap_cannon")))["player1.weapon1.mesh"].Text);
+        // A name no table has still falls through to the model of that name.
+        Assert.Equal("some_model", Run(gameExt, ("player1.weapon1.change", HudEventValue.FromName("some_model")))["player1.weapon1.mesh"].Text);
+    }
+
+    [Fact]
     public void Math_Compare_And_Lerp()
     {
         var g = Graph("""

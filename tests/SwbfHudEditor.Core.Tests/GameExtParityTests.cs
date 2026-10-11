@@ -19,7 +19,7 @@ public class GameExtParityTests
         ["[Features] HudSubPixel"] = "Modelled: under GameExt the canvas draws without the stock game's snap to whole units.",
         ["[Features] TargetBarLatchSeconds"] = "Run time only: how long a target's position lasts; the Events tab sends positions by hand.",
         ["[Fixes] ReticleCorrection"] = "Run time only: it moves the reticle's position event onto the aim point.",
-        ["[Fixes] WeaponIconFix"] = "Not modelled yet: an unmapped TransformNameMesh still sends the model by name, as in the stock game.",
+        ["[Fixes] WeaponIconFix"] = "Modelled: under GameExt a TransformNameMesh with no row for a name stays quiet when another table for the event has one.",
     };
 
     private static string SourceFile([CallerFilePath] string path = "") => path;

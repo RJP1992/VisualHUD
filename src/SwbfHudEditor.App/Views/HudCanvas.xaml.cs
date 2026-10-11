@@ -544,7 +544,7 @@ public partial class HudCanvas : UserControl
             return;
         }
 
-        _graph = HudTransformGraph.From(_documents);
+        _graph = HudTransformGraph.From(_documents, gameExt: _target == HudTarget.GameExt);
         HudSimulation? simulation = null;
         if (_events is not null && (_showByEvents || _events.Sends.Count > 0))
         {

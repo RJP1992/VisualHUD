@@ -40,7 +40,7 @@ public class HudProblemsTests
             Bitmap("fine")
             {
                 Position(0.5, 0.5, 0, "ViewportX")
-                BitmapRect(10, 10, "Left", "Top", "Pixels")
+                BitmapRect(0.1, 0.1, "Left", "Top", "Viewport")
             }
             """);
         Assert.Contains("as Pixels", Assert.Single(At(problems, "a", "Position")).Message);
@@ -49,6 +49,70 @@ public class HudProblemsTests
         Assert.Contains("keeps Viewport", Assert.Single(At(problems, "c", "Rect")).Message);
         // A name the unit starts with is read as that unit.
         Assert.Empty(problems.Where(p => p.Block.ItemName == "fine"));
+    }
+
+    [Fact]
+    public void Pixels_Drift_With_The_Resolution_Except_Where_The_Game_Needs_Them()
+    {
+        var problems = Check("""
+            Bitmap("px")
+            {
+                Position(100, 100, 0)
+                BitmapRect(32, 32, "Left", "Top", "Pixels")
+            }
+            Bitmap("zero")
+            {
+                Position(0, 0, 0)
+                BitmapRect(0.1, 0.1, "Left", "Top", "Viewport")
+            }
+            Group("rect")
+            {
+                Rect(200, 100, "Left", "Top", "Pixels")
+            }
+            VehicleSeating("seats")
+            {
+                Position(900, 600, 0)
+            }
+            Model3D("shared")
+            {
+                Mesh("one")
+                MeshInfo("one")
+                {
+                    Position(40, 50, 0)
+                }
+            }
+            Model3D("reader")
+            {
+                InheritMeshInfo("shared")
+            }
+            Model3D("own")
+            {
+                Mesh("two")
+                MeshInfo("two")
+                {
+                    Position(40, 50, 0)
+                }
+            }
+            Map("map")
+            {
+                Position(100, 100, 0)
+            }
+            """);
+        Assert.Contains("In pixels: the same number", Assert.Single(At(problems, "px", "Position")).Message);
+        Assert.Contains("In pixels: the same number", Assert.Single(At(problems, "px", "BitmapRect")).Message);
+        Assert.Contains("In pixels: the same number", Assert.Single(At(problems, "rect", "Rect")).Message);
+        Assert.Empty(problems.Where(p => p.Block.ItemName == "zero"));
+        // The game reads a seating chart's own Position in pixels whatever is written: a group round it scales.
+        var seats = Assert.Single(At(problems, "seats", "Position"));
+        Assert.Equal(ProblemLevel.Warning, seats.Level);
+        Assert.Contains("group round it", seats.Message);
+        // A table two models read must stay in pixels: a note; one only its model reads, a warning.
+        var shared = Assert.Single(At(problems, "one", "Position"));
+        Assert.Equal(ProblemLevel.Note, shared.Level);
+        Assert.Contains("as it must be", shared.Message);
+        Assert.Equal(ProblemLevel.Warning, Assert.Single(At(problems, "two", "Position")).Level);
+        // A Map's own Position is replaced: no word of its unit.
+        Assert.DoesNotContain(At(problems, "map", "Position"), p => p.Message.Contains("In pixels"));
     }
 
     [Fact]

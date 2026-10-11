@@ -20,7 +20,7 @@ public class ProblemsTests
             Bitmap("icon")
             {
                 Position(10, 20, 0, "Viewpor")
-                BitmapRect(32, 32, "Left", "Top", "Pixels")
+                BitmapRect(0.025, 0.044444, "Left", "Top", "Viewport")
             }
 
             Model3D("shape")

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using SwbfHudEditor.Core.Assets;
+using SwbfHudEditor.Core.Edits;
 using SwbfHudEditor.Core.Events;
 using SwbfHudEditor.Core.Hud;
 using SwbfHudEditor.Core.Layout;
@@ -103,6 +104,28 @@ public static partial class HudProblems
         // Every element and transform by name, in load order: the first is the one a name finds.
         public Dictionary<string, List<(HudDocument Document, HudBlock Block)>> Named { get; } = NamedItems(all);
 
+        /// <summary>The Model3D a model's InheritMeshInfo reads the table of: the first of that name made before it.</summary>
+        public HudBlock? InheritedFrom(HudBlock model, string name) =>
+            Named.TryGetValue(name, out var list)
+                ? list.Select(x => x.Block).FirstOrDefault(b => b.Name == "Model3D" && Before(b, model))
+                : null;
+
+        /// <summary>Whether another model reads this model's MeshInfo table: one with InheritMeshInfo and no MeshInfo of its own.</summary>
+        public bool SharesTable(HudBlock model) => (_sharing ??= Sharing()).Contains(model);
+
+        private HashSet<HudBlock>? _sharing;
+
+        private HashSet<HudBlock> Sharing()
+        {
+            var sharing = new HashSet<HudBlock>(ReferenceEqualityComparer.Instance);
+            foreach (var block in Blocks(all.SelectMany(d => d.TopLevel)))
+                if (block.Name == "Model3D" && !block.Children.Any(c => c.HasBody && c.Name == "MeshInfo") &&
+                    LastLine(block, "InheritMeshInfo") is { } inherit && StringAt(inherit, 0) is { } name &&
+                    InheritedFrom(block, name) is { } from)
+                    sharing.Add(from);
+            return sharing;
+        }
+
         private static Dictionary<string, List<(HudDocument, HudBlock)>> NamedItems(IReadOnlyList<HudDocument> all)
         {
             var named = new Dictionary<string, List<(HudDocument, HudBlock)>>(StringComparer.OrdinalIgnoreCase);
@@ -132,7 +155,11 @@ public static partial class HudProblems
         {
             if (readsLines && PropertyCatalog.Find(block, parent, line.Name) is null)
                 add(ProblemLevel.Warning, block, line, $"{Describe(block)} reads no {line.Name} line: the game ignores it.");
-            else if (readsLines) Units(block, line, add);
+            else if (readsLines)
+            {
+                Units(block, line, add);
+                Pixels(block, parent, line, context, add);
+            }
             Assets(block, line, context, add);
         }
         // A MeshInfo places a model only an event sends, such as a weapon's: it matters only once that is sent.
@@ -183,6 +210,40 @@ public static partial class HudProblems
                 add(ProblemLevel.Warning, block, line, $"\"{line.Arguments[4].Raw}\" names no unit a BitmapRect takes (Pixels, Screen, Viewport): the game reads it as Viewport.");
                 break;
         }
+    }
+
+    /// <summary>
+    /// A place or size in pixels, which stays the same number of pixels at every resolution while what is sized
+    /// in Viewport or Screen units grows and shrinks with the screen, so the two drift apart. Not a line the game
+    /// replaces, nor one of 0; only a note where the game needs pixels.
+    /// </summary>
+    private static void Pixels(HudBlock block, HudBlock? parent, HudBlock line, Context context, Report add)
+    {
+        if (UnitConversion.Of(line.Name) is not { } unit || line.Arguments.Count <= unit.Y ||
+            !EngineArgs.IsNumber(line.Arguments[unit.X]) || !EngineArgs.IsNumber(line.Arguments[unit.Y]) ||
+            EngineArgs.Float(line.Arguments[unit.X]) == 0f && EngineArgs.Float(line.Arguments[unit.Y]) == 0f ||
+            UnitConversion.ModeOf(line) != RelativeMode.Pixels) return;
+        // A Position whose unit names nothing is pointed out as read in pixels already.
+        if (line.Name == "Position" && line.Arguments.Count >= 4 && EngineArgs.IsString(line.Arguments[3]) &&
+            EngineArgs.TranslateString(EngineArgs.RelativeModeNames, 4, line.Arguments[3].Raw) < 0) return;
+
+        var kind = ElementKinds.TryGet(block, out var k) ? k : (ElementKind?)null;
+        var parentKind = parent is not null && ElementKinds.TryGet(parent, out var pk) ? pk : (ElementKind?)null;
+        if (line.Name == "Position" &&
+            (kind == ElementKind.Map ||                                                      // sits at its PositionSmall, ...
+             kind is null && parentKind == ElementKind.Target ||                             // a marker is placed by the Target
+             block.Name == "Format" && parentKind == ElementKind.MultilineText ||            // each line is laid out by the list
+             block.Name == "Segment" && parentKind == ElementKind.BarSegmented)) return;     // each segment is placed by the bar
+
+        if (kind == ElementKind.VehicleSeating && line.Name == "Position")
+            add(ProblemLevel.Warning, block, line,
+                "In pixels, as a VehicleSeating reads its own Position whatever its unit: the chart is the same number of pixels from its parent at every resolution. Leave it at 0 and place the chart with a group round it, in Viewport.");
+        else if (block.Name == "MeshInfo" && line.Name == "Position" && parent is not null && context.SharesTable(parent))
+            add(ProblemLevel.Note, block, line,
+                $"In pixels, as it must be: another model reads \"{NameOf(parent)}\"'s table with InheritMeshInfo and converts it again. It stays the same number of pixels at every resolution; a MeshInfo of each model's own, in Viewport, would scale.");
+        else
+            add(ProblemLevel.Warning, block, line,
+                "In pixels: the same number of pixels at every resolution, so it drifts against what is sized in Viewport or Screen units. Edit > Convert units > To Viewport keeps it where it is at the canvas's screen.");
     }
 
     // ---- What each kind of element reads its own way -----------------------------------------------------------
@@ -270,9 +331,7 @@ public static partial class HudProblems
 
         if (LastLine(block, "InheritMeshInfo") is not { } inherit || StringAt(inherit, 0) is not { } name) return;
         // The table of a Model3D made before it, the first of that name.
-        var from = context.Named.TryGetValue(name, out var list)
-            ? list.Select(x => x.Block).FirstOrDefault(b => b.Name == "Model3D" && context.Before(b, block))
-            : null;
+        var from = context.InheritedFrom(block, name);
         if (from is null)
         {
             add(ProblemLevel.Warning, block, inherit, $"No Model3D named \"{name}\" is made before this one: there is no table to share.");

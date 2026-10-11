@@ -371,6 +371,9 @@ double-click or Enter goes to its line in the Properties panel. It follows every
   sends (not the game, GameExt or a transform in the files loaded; each player's events count);
   `InheritMeshInfo` naming no model made before it, or a table whose positions are not in Pixels
   and are converted again; a `VehicleSeating`'s own `Position` in a unit (it is read as pixels);
+  a `Position`, `Rect` or `BitmapRect` in pixels (not 0), which drifts against the rest at
+  another resolution, a seating chart's own one included (a group round it can place it in
+  Viewport);
   a `Viewport` line inside a group that says otherwise than the group; a group's `BlendMode`
   before its children, which changes nothing; a `MultilineText` without `NumLines`; an
   `ObjectiveList` not named `playerNobjectives`.
@@ -379,7 +382,8 @@ double-click or Enter goes to its line in the Properties panel. It follows every
   `Position`, `Rotation` or `Depth` before its `Mesh`; a model's `BlendMode`; a group's
   `BlendMode` between its children; a name another element in the same view has; an event read
   that nothing sends; a transform inside an element; a `FileInfo`'s `Widescreen`; a
-  `MeshInfo`'s model not found, which draws only when an event sends it.
+  `MeshInfo`'s model not found, which draws only when an event sends it; the pixels of a
+  `MeshInfo` table two models read, which must stay so.
 
 ## Snapshots
 

@@ -13,8 +13,9 @@ bar fills, segmented rings, draw order and rounding. How each rule was read is i
 
 ## Download
 
-VisualHUD is one file, `VisualHUD.exe`, on the repository's Releases page. It runs on 64-bit
-Windows 10 or 11 with nothing else to install. It is not signed, so Windows SmartScreen may stop
+VisualHUD is one file, `VisualHUD.exe`, on the
+[Releases page](https://github.com/RJP1992/VisualHUD/releases). It runs on 64-bit Windows 10 or
+11 with nothing else to install. It is not signed, so Windows SmartScreen may stop
 it the first time: choose **More info**, then **Run anyway**.
 
 On its first start the editor asks where the Battlefront II mod tools are: the `BF2_ModTools`
@@ -432,5 +433,6 @@ be read first. The picture at the top of this page is
 
 ## Credits
 
-VisualHUD was started by Surestsafe, who wrote the editor this continues: the `.hud` parser
-and writer, mesh and texture loading, localization, undo and the property panel.
+VisualHUD is made by Ryan Hank with the help of Claude, built on the original, unfinished tool by
+Surestsafe, which gave it its `.hud` parser and writer, mesh and texture loading, localization,
+undo and the property panel.

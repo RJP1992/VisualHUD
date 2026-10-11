@@ -18,7 +18,11 @@
         <TextBlock TextWrapping="Wrap" Margin="0,18,0,0"
                    Text="An editor for Star Wars Battlefront II (2005) .hud files that draws a HUD the way the game does, for the stock game or for the game with BF2GameExt." />
         <TextBlock TextWrapping="Wrap" Margin="0,12,0,0" Foreground="{StaticResource TextSecondaryBrush}"
-                   Text="Made by RJP1992, on the foundation Surestsafe wrote: the .hud parser and writer, mesh and texture loading, localization, undo and the property panel." />
+                   Text="Made by Ryan Hank with the help of Claude, built on the original, unfinished tool by Surestsafe." />
+        <TextBlock Margin="0,10,0,0">
+            <Hyperlink NavigateUri="https://github.com/RJP1992/VisualHUD" RequestNavigate="Link_RequestNavigate"
+                       Foreground="{StaticResource AccentBrush}">github.com/RJP1992/VisualHUD</Hyperlink>
+        </TextBlock>
         <Button Content="OK" IsDefault="True" IsCancel="True" HorizontalAlignment="Right" MinWidth="84" Margin="0,20,0,0" />
     </StackPanel>
 </Window>

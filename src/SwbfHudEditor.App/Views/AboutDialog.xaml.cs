@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Navigation;
 
 namespace SwbfHudEditor.App.Views;
 
@@ -11,6 +13,13 @@ public partial class AboutDialog : Window
     {
         InitializeComponent();
         VersionText.Text = $"Version {Version}";
+    }
+
+    private void Link_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        try { Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+        e.Handled = true;
     }
 
     /// <summary>The editor's version, as its project gives it: 1.0.0.</summary>

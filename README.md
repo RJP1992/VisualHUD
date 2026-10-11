@@ -4,17 +4,32 @@ An editor for Star Wars Battlefront II (2005) `.hud` files that draws a HUD the 
 does, on the screen you pick, for the stock game or for the game with
 [BF2GameExt](https://github.com/S1thK3nny/BF2GameExt).
 
+![VisualHUD showing the stock HUD as a soldier on foot sees it, with the health bar selected](docs/images/visualhud.png)
+
 The layout follows the engine's own code rather than estimates: positions, Rects and
 alignment, the 640 × 480 mapping and the letterbox a wide screen gets, the bitmap stretch,
 bar fills, segmented rings, draw order and rounding. How each rule was read is in
 [docs/Engine.md](docs/Engine.md), along with what is not modelled yet.
 
-## Build and run
+## Download
 
-The release is one file, `VisualHUD.exe`, that runs on 64-bit Windows 10 or 11 with nothing
-else installed. To build it, run `tools\publish.bat`; it writes `dist\VisualHUD.exe`.
+VisualHUD is one file, `VisualHUD.exe`, on the repository's Releases page. It runs on 64-bit
+Windows 10 or 11 with nothing else to install. It is not signed, so Windows SmartScreen may stop
+it the first time: choose **More info**, then **Run anyway**.
 
-To work on the editor you need the .NET 8 SDK (or newer) on Windows.
+On its first start the editor asks where the Battlefront II mod tools are: the `BF2_ModTools`
+folder, which it looks for at the root of each drive to start with (picking a folder inside it,
+such as `data` or a mod's `data_ABC`, comes to the same). The stock HUD files, textures, models,
+fonts and strings are read from there. **File > Mod tools folder** changes it later. Without the
+mod tools, a HUD shows what its own folders and the asset folders hold.
+
+**Help > Guide** (F1) walks through the editor, then how a HUD is put together: files, units,
+wide screens, events, text and testing in the game. It is also [docs/Guide.md](docs/Guide.md).
+The rest of this page is the reference for every feature.
+
+## Build from source
+
+You need the .NET 8 SDK (or newer) on Windows.
 
 ```bash
 dotnet build SwbfHudEditor.sln
@@ -22,14 +37,9 @@ dotnet build SwbfHudEditor.sln
 
 Then run `src/SwbfHudEditor.App/bin/Debug/net8.0-windows/VisualHUD.exe`, with one or more
 `.hud` files as arguments if you like. Textures, models, fonts, the transforms files and the
-English localization are looked up next to the files and in the mod tools' `data\Common`, then
-in any asset folders you add (see [Assets](#assets)).
-
-On its first start the editor asks where the Battlefront II mod tools are: the `BF2_ModTools`
-folder, which it looks for at the root of each drive to start with (picking a folder inside it,
-such as `data` or a mod's `data_ABC`, comes to the same). The stock HUD files, textures, models,
-fonts and strings are read from its `data` folder. **File > Mod tools folder** changes it later.
-Without the mod tools, a HUD shows what its own folders and the asset folders hold.
+English localization are looked up next to the files and in the mod tools, then in any asset
+folders you add (see [Assets](#assets)). `tools\publish.bat` builds the release,
+`dist\VisualHUD.exe`.
 
 ```bash
 dotnet test SwbfHudEditor.sln
@@ -89,8 +99,9 @@ one's for the same key.
 
 - **Searched automatically:** the data folder of the mod each open file belongs to, with all
   its subfolders (all of `data_BF3`, its `Sides` and `Load` included, for a file in
-  `data_BF3\Common\hud`), then the mod tools' own `data`. This needs the mod tools'
-  `<data>\Common\hud` layout; a file elsewhere gets no automatic folder.
+  `data_BF3\Common\hud`), then the mod tools' own `data`, then their `assets\sides`, where the
+  stock weapon models are. A mod's folder needs the mod tools' `<data>\Common\hud` layout; a file
+  elsewhere gets none of its own.
 - **File > Add asset folder** adds more folders, searched the same way after those, for
   whatever none of them has. A name found in several places resolves to the first path in
   alphabetical order.
@@ -414,8 +425,10 @@ VisualHUD.exe --snapshot 1playerhud.hud out.png --preset onfoot --send player1.h
 ```
 
 `--ui-snapshot out.png file.hud...` draws the whole editor window instead, off the screen, with
-`--ui-size WxH`, `--ui-select name` and `--ui-left elements|events|assets`, to check the interface
-without showing it.
+`--ui-size WxH`, `--ui-select name`, `--ui-left elements|events|assets|find|problems` and
+`--ui-preset onfoot`, to check the interface without showing it. It waits for the asset folders to
+be read first. The picture at the top of this page is
+`--ui-snapshot visualhud.png 1playerhud.hud --ui-size 1920x1080 --ui-preset onfoot --ui-select player1healthbar`.
 
 ## Credits
 

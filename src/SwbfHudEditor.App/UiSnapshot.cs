@@ -12,7 +12,7 @@ namespace SwbfHudEditor.App;
 /// opens off screen, never activated, so nothing on the desktop changes.
 /// <code>
 /// VisualHUD.exe --ui-snapshot out.png file.hud... [--ui-size 1600x900] [--ui-select name] [--ui-left events]
-///     [--ui-find text [--ui-replace text]]
+///     [--ui-find text [--ui-replace text]] [--ui-preset onfoot]
 /// </code>
 /// </summary>
 internal static class UiSnapshot
@@ -27,6 +27,7 @@ internal static class UiSnapshot
         string? left = null;
         string? find = null;
         string? replace = null;
+        string? preset = null;
         var files = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
@@ -51,6 +52,9 @@ internal static class UiSnapshot
                 case "--ui-replace":
                     replace = args[++i];
                     break;
+                case "--ui-preset":
+                    preset = args[++i];
+                    break;
                 default:
                     if (args[i].EndsWith(".hud", StringComparison.OrdinalIgnoreCase)) files.Add(Path.GetFullPath(args[i]));
                     break;
@@ -73,11 +77,14 @@ internal static class UiSnapshot
         {
             try
             {
+                if (string.Equals(preset, "onfoot", StringComparison.OrdinalIgnoreCase)) window.SendOnFoot();
                 if (left is not null) window.ShowLeftTab(left);
                 if (select is not null) window.SelectByName(select);
                 if (find is not null) window.ShowFind(find, replace);
-                // Let the background asset scans and the first renders settle.
+                // Let the background asset scans finish, up to a minute, and the renders settle.
                 await Task.Delay(2500);
+                for (var waited = 0; window.Scanning && waited < 600; waited++) await Task.Delay(100);
+                if (window.Scanning is false) await Task.Delay(500);
                 window.UpdateLayout();
                 Save(window, output);
                 app.Shutdown(0);

@@ -53,6 +53,9 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _folderErrors = new(HudFileSet.PathComparer);
     private readonly Dictionary<string, int> _scanGeneration = new(HudFileSet.PathComparer);
     private readonly HashSet<string> _scanning = new(HudFileSet.PathComparer);
+
+    /// <summary>Whether an asset folder is being read in the background.</summary>
+    internal bool Scanning => _scanning.Count > 0;
     private readonly Dictionary<string, IReadOnlyList<string>> _meshTextures = new(StringComparer.OrdinalIgnoreCase);
     private AssetResolver? _assets;
     private LocalizationTable? _localization;
@@ -105,13 +108,7 @@ public partial class MainWindow : Window
         EventsList.ScenarioSaveRequested += (_, name) => SaveScenario(name);
         EventsList.ScenarioDeleteRequested += (_, name) => DeleteScenario(name);
         EventsList.ShowScenarios(_settings.Scenarios.Select(s => s.Name));
-        EventsList.OnFootRequested += (_, _) =>
-        {
-            if (Canvas.Transforms is not { } graph) return;
-            _events.SendAll(HudEventPresets.OnFoot(graph));
-            EventsList.StartSimulating();
-            StatusText.Text = "Sent the on-foot events.";
-        };
+        EventsList.OnFootRequested += (_, _) => SendOnFoot();
         Canvas.SimulationUpdated += (_, simulation) => EventsList.ShowSimulation(simulation);
         AssetsList.AddFolderRequested += (_, _) => AddAssetFolders();
         AssetsList.RemoveFolderRequested += (_, folder) => RemoveAssetFolder(folder);
@@ -542,13 +539,15 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The folders searched, with all their subfolders, without being added: the data folder of the
-    /// mod each file belongs to (<c>data_BF3</c> for <c>data_BF3\Common\hud\x.hud</c>), then the stock
-    /// data folder.
+    /// mod each file belongs to (<c>data_BF3</c> for <c>data_BF3\Common\hud\x.hud</c>), then the mod
+    /// tools' own data folder and their <c>assets\sides</c>, where the stock weapon models are.
     /// </summary>
     internal static IReadOnlyList<string> AutomaticAssetFoldersFor(IEnumerable<string> hudPaths)
     {
         var folders = hudPaths.Select(AssetResolver.ModDataFolderOf).OfType<string>().ToList();
-        if (ModTools.Folder is { } tools && Directory.Exists(Path.Combine(tools, "data"))) folders.Add(Path.Combine(tools, "data"));
+        if (ModTools.Folder is { } tools)
+            foreach (var stock in new[] { Path.Combine(tools, "data"), Path.Combine(tools, "assets", "sides") })
+                if (Directory.Exists(stock)) folders.Add(stock);
         return folders.Distinct(HudFileSet.PathComparer).ToList();
     }
 
@@ -604,6 +603,15 @@ public partial class MainWindow : Window
         }
         if (_settings.Save() is { } error) StatusText.Text = $"Could not save the settings: {error}";
         foreach (var folder in added) ScanAssetFolder(folder);
+    }
+
+    /// <summary>Send what the game has sent by the time a soldier has spawned, showing and hiding as the game does.</summary>
+    internal void SendOnFoot()
+    {
+        if (Canvas.Transforms is not { } graph) return;
+        _events.SendAll(HudEventPresets.OnFoot(graph));
+        EventsList.StartSimulating();
+        StatusText.Text = "Sent the on-foot events.";
     }
 
     private void ModTools_Click(object sender, RoutedEventArgs e) => AskModTools(firstStart: false);
